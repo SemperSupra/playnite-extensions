@@ -248,7 +248,30 @@ try {
         }
         $receipt.phases.template_build = "PASS"
 
-        & $toolboxExe pack $pluginDir $packageRoot
+        # Playnite's Toolbox documentation requires plugin packing to target
+        # the folder containing built binaries. The generated project copies
+        # extension.yaml/icon/localization into its build output.
+        $buildOutput = Join-Path $pluginDir "bin\Release\net462"
+        $modulePath = Join-Path $buildOutput "SemperSupraRdteProbe.dll"
+        $builtManifest = Join-Path $buildOutput "extension.yaml"
+        if (-not (Test-Path $modulePath) -or -not (Test-Path $builtManifest)) {
+            throw "Generated plugin build output is missing its runtime module or extension.yaml."
+        }
+
+        $receipt.template_plugin = [ordered]@{
+            build_output = $buildOutput
+            staged_files = @(
+                Get-ChildItem $buildOutput -File -Recurse |
+                    ForEach-Object {
+                        [ordered]@{
+                            path = $_.FullName.Substring($buildOutput.Length).TrimStart("\")
+                            sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                        }
+                    }
+            )
+        }
+
+        & $toolboxExe pack $buildOutput $packageRoot
         if ($LASTEXITCODE -ne 0) {
             throw "Toolbox pack failed with exit code $LASTEXITCODE."
         }
@@ -261,10 +284,19 @@ try {
         $pextManifest = Get-PextManifest -Path $pextPath
         $receipt.phases.toolbox_pack = "PASS"
 
-        $receipt.template_plugin = [ordered]@{
-            id = $pextManifest.Id
-            version = $pextManifest.Version
-            package_sha256 = $pextHash
+        $receipt.template_plugin.id = $pextManifest.Id
+        $receipt.template_plugin.version = $pextManifest.Version
+        $receipt.template_plugin.package_sha256 = $pextHash
+
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $packageZip = [System.IO.Compression.ZipFile]::OpenRead($pextPath)
+        try {
+            $receipt.template_plugin.package_entries = @(
+                $packageZip.Entries | ForEach-Object { $_.FullName } | Sort-Object
+            )
+        }
+        finally {
+            $packageZip.Dispose()
         }
 
         $queuePath = Join-Path $userData "extinstalls.json"
@@ -307,6 +339,23 @@ try {
         if ($playniteProcess.HasExited) {
             throw "Playnite exited during restart/load smoke; exit code $($playniteProcess.ExitCode)."
         }
+
+        $logPath = Join-Path $userData "playnite.log"
+        if (-not (Test-Path $logPath)) {
+            throw "Playnite log is unavailable for plugin-load verification."
+        }
+
+        $logText = Get-Content $logPath -Raw
+        $loadSuccess = "Loaded plugin: Generic Plugin, version $($pextManifest.Version)"
+        $loadFailure = "Failed to load plugin: Generic Plugin"
+        if ($logText.Contains($loadFailure)) {
+            throw "Playnite reported a plugin load failure for the native template package."
+        }
+        if (-not $logText.Contains($loadSuccess)) {
+            throw "Playnite did not emit the expected positive plugin-load oracle: '$loadSuccess'."
+        }
+
+        $receipt.template_plugin.load_oracle = $loadSuccess
         Stop-Playnite -DesktopExe $desktopExe -UserData $userData
         $receipt.phases.restart_load = "PASS"
     }
