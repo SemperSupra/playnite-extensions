@@ -66,7 +66,6 @@ namespace SemperSupraRdteSeeder
                     SourceId = SourceHumble,
                     CategoryIds = new List<Guid> { CategoryBook },
                     SeriesIds = new List<Guid> { SeriesMedia },
-                    IsCustomGame = true,
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -82,7 +81,6 @@ namespace SemperSupraRdteSeeder
                     SourceId = SourceHumble,
                     CategoryIds = new List<Guid> { CategoryComic },
                     SeriesIds = new List<Guid> { SeriesMedia },
-                    IsCustomGame = true,
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -97,7 +95,6 @@ namespace SemperSupraRdteSeeder
                     GameId = "rdte-humble-soundtrack",
                     SourceId = SourceHumble,
                     CategoryIds = new List<Guid> { CategoryAudio },
-                    IsCustomGame = true,
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -110,7 +107,6 @@ namespace SemperSupraRdteSeeder
                     Id = GameManual,
                     GameId = "rdte-manual-game",
                     SourceId = SourceManual,
-                    IsCustomGame = true,
                     IsInstalled = false,
                     OverrideInstallState = true,
                     Manual = pdfPath,
@@ -177,7 +173,6 @@ namespace SemperSupraRdteSeeder
             existing.SourceId = desired.SourceId;
             existing.CategoryIds = desired.CategoryIds == null ? null : new List<Guid>(desired.CategoryIds);
             existing.SeriesIds = desired.SeriesIds == null ? null : new List<Guid>(desired.SeriesIds);
-            existing.IsCustomGame = desired.IsCustomGame;
             existing.IsInstalled = desired.IsInstalled;
             existing.OverrideInstallState = desired.OverrideInstallState;
             existing.InstallDirectory = desired.InstallDirectory;
