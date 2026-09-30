@@ -1,4 +1,4 @@
-name: Playnite 10.62 Runtime Probe
+name: Playnite 10.62 Native RDTE Probe
 
 on:
   pull_request:
@@ -13,25 +13,26 @@ permissions:
 jobs:
   probe:
     runs-on: windows-2025
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
 
-      - name: Probe pinned Playnite runtime
+      - name: Probe pinned Playnite runtime and native extension lifecycle
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP "playnite-runtime-evidence"
           ./tooling/rdte/probe-playnite-runtime.ps1 `
             -ManifestPath ./tooling/rdte/playnite-10.62.json `
-            -EvidenceDir $evidence
+            -EvidenceDir $evidence `
+            -ExerciseTemplateLifecycle
 
       - name: Upload public-safe evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: playnite-runtime-10.62-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/playnite-runtime-evidence/receipt.json
+          path: ${{ runner.temp }}/playnite-runtime-evidence
           if-no-files-found: error
           retention-days: 7
