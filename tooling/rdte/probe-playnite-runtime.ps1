@@ -8,6 +8,8 @@ param(
 
     [switch]$ExerciseTemplateLifecycle,
 
+    [switch]$ExerciseFixtureSeeder,
+
     [int]$StartupTimeoutSeconds = 45
 )
 
@@ -210,6 +212,7 @@ $receipt = [ordered]@{
         toolbox_file_version = $null
     }
     template_plugin = $null
+    fixture_seeder = $null
     phases = [ordered]@{
         acquire = "NOT_RUN"
         extract = "NOT_RUN"
@@ -222,6 +225,9 @@ $receipt = [ordered]@{
         toolbox_pack = if ($ExerciseTemplateLifecycle) { "NOT_RUN" } else { "SKIPPED" }
         native_install = if ($ExerciseTemplateLifecycle) { "NOT_RUN" } else { "SKIPPED" }
         restart_load = if ($ExerciseTemplateLifecycle) { "NOT_RUN" } else { "SKIPPED" }
+        fixture_seed = if ($ExerciseFixtureSeeder) { "NOT_RUN" } else { "SKIPPED" }
+        fixture_idempotence = if ($ExerciseFixtureSeeder) { "NOT_RUN" } else { "SKIPPED" }
+        fixture_uninstall = if ($ExerciseFixtureSeeder) { "NOT_RUN" } else { "SKIPPED" }
     }
     result = "RUNNING"
 }
@@ -430,6 +436,187 @@ try {
         $receipt.template_plugin.load_oracle = $loadSuccess
         Stop-Playnite -DesktopExe $desktopExe -UserData $userData
         $receipt.phases.restart_load = "PASS"
+    }
+
+    if ($ExerciseFixtureSeeder) {
+        $seederTemplateRoot = Join-Path $workRoot "fixture-seeder-template"
+        $seederPackageRoot = Join-Path $workRoot "fixture-seeder-package"
+        New-Item $seederTemplateRoot, $seederPackageRoot -ItemType Directory -Force | Out-Null
+
+        & $toolboxExe new GenericPlugin SemperSupraRdteSeeder $seederTemplateRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw "Toolbox fixture-seeder template generation failed with exit code $LASTEXITCODE."
+        }
+
+        $seederDir = Join-Path $seederTemplateRoot "SemperSupraRdteSeeder"
+        $seederSource = Join-Path $PSScriptRoot "FixtureSeeder.cs"
+        if (-not (Test-Path $seederSource)) {
+            throw "Fixture seeder source '$seederSource' is missing."
+        }
+        Copy-Item $seederSource (Join-Path $seederDir "SemperSupraRdteSeeder.cs") -Force
+
+        $seederManifestPath = Join-Path $seederDir "extension.yaml"
+        $seederManifestText = Get-Content $seederManifestPath -Raw
+        $seederManifestText = [regex]::Replace(
+            $seederManifestText,
+            "(?m)^Id:\s*.*$",
+            "Id: SemperSupraRdteSeeder_6d06cf1b-d1e4-4caa-b6c3-cc6026953135")
+        $seederManifestText = [regex]::Replace(
+            $seederManifestText,
+            "(?m)^Name:\s*.*$",
+            "Name: RDTE Fixture Seeder")
+        $seederManifestText = [regex]::Replace(
+            $seederManifestText,
+            "(?m)^Author:\s*.*$",
+            "Author: SemperSupra RDTE")
+        Set-Content $seederManifestPath -Value $seederManifestText -Encoding UTF8
+
+        $seederProject = @(Get-ChildItem $seederDir -Filter "*.csproj" -File -Recurse)
+        if ($seederProject.Count -ne 1) {
+            throw "Expected one fixture-seeder project, found $($seederProject.Count)."
+        }
+
+        & dotnet build $seederProject[0].FullName -c Release --nologo
+        if ($LASTEXITCODE -ne 0) {
+            throw "Fixture seeder build failed with exit code $LASTEXITCODE."
+        }
+
+        $seederBuildOutput = Join-Path $seederDir "bin\Release\net462"
+        if (-not (Test-Path (Join-Path $seederBuildOutput "SemperSupraRdteSeeder.dll"))) {
+            throw "Fixture seeder module is missing from build output."
+        }
+
+        & $toolboxExe pack $seederBuildOutput $seederPackageRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw "Fixture seeder Toolbox pack failed with exit code $LASTEXITCODE."
+        }
+
+        $seederPackages = @(Get-ChildItem $seederPackageRoot -Filter "*.pext" -File)
+        if ($seederPackages.Count -ne 1) {
+            throw "Expected one fixture-seeder .pext, found $($seederPackages.Count)."
+        }
+
+        $seederPext = $seederPackages[0].FullName
+        $seederPextManifest = Get-PextManifest -Path $seederPext
+        $expectedSeederId = "SemperSupraRdteSeeder_6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
+        if ($seederPextManifest.Id -ne $expectedSeederId) {
+            throw "Fixture seeder package ID mismatch: '$($seederPextManifest.Id)'."
+        }
+
+        $receipt.fixture_seeder = [ordered]@{
+            id = $seederPextManifest.Id
+            version = $seederPextManifest.Version
+            package_sha256 = (Get-FileHash $seederPext -Algorithm SHA256).Hash.ToLowerInvariant()
+            first_seed = $null
+            second_seed = $null
+            uninstall = $false
+        }
+
+        $queuePath = Join-Path $userData "extinstalls.json"
+        @([ordered]@{ InstallType = 0; Path = $seederPext }) |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -Path $queuePath -Encoding UTF8
+
+        if (Test-Path $logPath) { Remove-Item $logPath -Force }
+        $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
+        $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+        while ((Test-Path $queuePath) -and [DateTime]::UtcNow -lt $deadline) {
+            if ($playniteProcess.HasExited) {
+                throw "Playnite exited before consuming fixture-seeder install queue."
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-Path $queuePath) {
+            throw "Playnite did not consume fixture-seeder install queue."
+        }
+
+        Wait-ForPlayniteStarted -LogPath $logPath -Version $manifest.playnite_version -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds | Out-Null
+        $seederInstalledDir = Find-InstalledExtension -UserData $userData -ExpectedId $expectedSeederId
+        if (-not $seederInstalledDir) {
+            throw "Fixture seeder did not materialize through Playnite native install."
+        }
+
+        $seederLog = Get-Content $logPath -Raw
+        if ($seederLog.Contains("Failed to load plugin: RDTE Fixture Seeder")) {
+            throw "Playnite reported fixture-seeder load failure."
+        }
+        if (-not $seederLog.Contains("Loaded plugin: RDTE Fixture Seeder, version $($seederPextManifest.Version)")) {
+            throw "Missing positive fixture-seeder plugin-load oracle."
+        }
+
+        $seedReceiptPath = Join-Path $userData "ExtensionsData\6d06cf1b-d1e4-4caa-b6c3-cc6026953135\seed-receipt.json"
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        while (-not (Test-Path $seedReceiptPath) -and [DateTime]::UtcNow -lt $deadline) {
+            if ($playniteProcess.HasExited) {
+                throw "Playnite exited before fixture-seeder receipt appeared."
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not (Test-Path $seedReceiptPath)) {
+            throw "Fixture seeder did not emit seed-receipt.json."
+        }
+
+        $firstSeed = Get-Content $seedReceiptPath -Raw | ConvertFrom-Json
+        if ($firstSeed.expected_fixture_games -ne 4 -or $firstSeed.observed_fixture_games -ne 4) {
+            throw "Fixture seeder did not create exactly four expected fixture games."
+        }
+        $receipt.fixture_seeder.first_seed = $firstSeed
+        Copy-Item $seedReceiptPath (Join-Path $EvidenceDir "seed-first.json") -Force
+        Stop-Playnite -DesktopExe $desktopExe -UserData $userData
+        $receipt.phases.fixture_seed = "PASS"
+
+        Remove-Item $seedReceiptPath -Force
+        if (Test-Path $logPath) { Remove-Item $logPath -Force }
+        $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
+        Wait-ForPlayniteStarted -LogPath $logPath -Version $manifest.playnite_version -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds | Out-Null
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        while (-not (Test-Path $seedReceiptPath) -and [DateTime]::UtcNow -lt $deadline) {
+            if ($playniteProcess.HasExited) {
+                throw "Playnite exited before second fixture-seeder receipt appeared."
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not (Test-Path $seedReceiptPath)) {
+            throw "Fixture seeder did not re-emit its receipt on second run."
+        }
+
+        $secondSeed = Get-Content $seedReceiptPath -Raw | ConvertFrom-Json
+        if ($secondSeed.expected_fixture_games -ne 4 -or
+            $secondSeed.observed_fixture_games -ne 4 -or
+            $secondSeed.total_library_games -ne $firstSeed.total_library_games) {
+            throw "Fixture seeder is not idempotent across restart."
+        }
+        $receipt.fixture_seeder.second_seed = $secondSeed
+        Copy-Item $seedReceiptPath (Join-Path $EvidenceDir "seed-second.json") -Force
+        Stop-Playnite -DesktopExe $desktopExe -UserData $userData
+        $receipt.phases.fixture_idempotence = "PASS"
+
+        @([ordered]@{ InstallType = 1; Path = $seederInstalledDir }) |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -Path $queuePath -Encoding UTF8
+
+        if (Test-Path $logPath) { Remove-Item $logPath -Force }
+        $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
+        $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+        while ((Test-Path $queuePath) -and [DateTime]::UtcNow -lt $deadline) {
+            if ($playniteProcess.HasExited) {
+                throw "Playnite exited before consuming fixture-seeder uninstall queue."
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-Path $queuePath) {
+            throw "Playnite did not consume fixture-seeder uninstall queue."
+        }
+
+        Wait-ForPlayniteStarted -LogPath $logPath -Version $manifest.playnite_version -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds | Out-Null
+        if (Test-Path $seederInstalledDir) {
+            throw "Fixture seeder extension directory remains after native uninstall."
+        }
+
+        Stop-Playnite -DesktopExe $desktopExe -UserData $userData
+        $receipt.fixture_seeder.uninstall = $true
+        $receipt.phases.fixture_uninstall = "PASS"
     }
 
     $receipt.result = "PASS"
