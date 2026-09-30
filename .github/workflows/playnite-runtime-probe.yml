@@ -26,7 +26,8 @@ jobs:
           ./tooling/rdte/probe-playnite-runtime.ps1 `
             -ManifestPath ./tooling/rdte/playnite-10.62.json `
             -EvidenceDir $evidence `
-            -ExerciseTemplateLifecycle
+            -ExerciseTemplateLifecycle `
+            -ExerciseFixtureSeeder
 
       - name: Upload public-safe evidence
         if: always()
