@@ -130,6 +130,13 @@ function Prepare-PlayniteSettings {
     )
 
     $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $libraryPath = Join-Path $UserData "library"
+    New-Item -Path $libraryPath -ItemType Directory -Force | Out-Null
+
+    # DesktopApplication.ProcessStartupWizard treats a non-empty DatabasePath
+    # as the authoritative signal that an existing/explicit library should be
+    # opened without entering the provider-selection wizard.
+    $config.DatabasePath = $libraryPath
     $config.FirstTimeWizardComplete = $true
     $config.ShowElevatedRightsWarning = $false
     $config.ShowNahimicServiceWarning = $false
