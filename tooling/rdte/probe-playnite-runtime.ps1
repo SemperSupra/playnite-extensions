@@ -36,9 +36,9 @@ function Stop-Playnite {
         "--userdatadir", $UserData,
         "--shutdown"
     ) -PassThru
-    $stopper.WaitForExit(15000) | Out-Null
+    $stopper.WaitForExit(30000) | Out-Null
 
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
         $running = @(Get-Process | Where-Object {
             $_.ProcessName -like "Playnite.DesktopApp*" -or
@@ -150,6 +150,9 @@ try {
     }
     $receipt.phases.initialize = "PASS"
 
+    # config.json is written before every startup subsystem has necessarily settled.
+    # Give the native pipe/UI lifecycle a bounded window before requesting shutdown.
+    Start-Sleep -Seconds 5
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     $receipt.phases.shutdown = "PASS"
     $receipt.result = "PASS"
