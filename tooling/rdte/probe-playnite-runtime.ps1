@@ -123,6 +123,53 @@ function Start-Playnite {
     return Start-Process -FilePath $DesktopExe -WorkingDirectory (Split-Path -Parent $DesktopExe) -ArgumentList $args -PassThru
 }
 
+function Prepare-PlayniteSettings {
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$UserData
+    )
+
+    $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $config.FirstTimeWizardComplete = $true
+    $config.ShowElevatedRightsWarning = $false
+    $config.ShowNahimicServiceWarning = $false
+    $config | ConvertTo-Json -Depth 100 |
+        Set-Content -Path $ConfigPath -Encoding UTF8
+
+    # A forced bootstrap stop intentionally bypasses clean Playnite shutdown.
+    # Remove the crash/safe-start sentinel before the clean qualification start.
+    $safeStart = Join-Path $UserData "safestart.flag"
+    if (Test-Path $safeStart) {
+        Remove-Item $safeStart -Force
+    }
+}
+
+function Wait-ForPlayniteStarted {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)]$Process,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $marker = "Application $Version.0.0 started"
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if ($Process.HasExited) {
+            throw "Playnite exited before the clean-start marker appeared; exit code $($Process.ExitCode)."
+        }
+        if (Test-Path $LogPath) {
+            $text = Get-Content $LogPath -Raw
+            if ($text.Contains($marker)) {
+                return $marker
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "Playnite did not emit clean-start marker '$marker' before timeout."
+}
+
 if ($env:OS -ne "Windows_NT") {
     throw "This probe requires Windows."
 }
@@ -160,7 +207,8 @@ $receipt = [ordered]@{
         acquire = "NOT_RUN"
         extract = "NOT_RUN"
         toolbox = "NOT_RUN"
-        initialize = "NOT_RUN"
+        bootstrap_config = "NOT_RUN"
+        clean_initialize = "NOT_RUN"
         shutdown = "NOT_RUN"
         template_new = if ($ExerciseTemplateLifecycle) { "NOT_RUN" } else { "SKIPPED" }
         template_build = if ($ExerciseTemplateLifecycle) { "NOT_RUN" } else { "SKIPPED" }
@@ -205,6 +253,10 @@ try {
     $receipt.playnite.toolbox_file_version = (Get-Item $toolboxExe).VersionInfo.FileVersion
     $receipt.phases.toolbox = "PASS"
 
+    # Bootstrap only far enough for Playnite to create its own settings schema.
+    # GitHub-hosted Windows runs elevated, so an untouched first startup blocks
+    # on Playnite's elevated-rights warning. This bootstrap is setup, not a
+    # lifecycle qualification oracle.
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData -ResetSettings
     $configPath = Join-Path $userData "config.json"
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
@@ -217,9 +269,22 @@ try {
     if (-not (Test-Path $configPath)) {
         throw "Playnite did not create config.json before timeout."
     }
-    $receipt.phases.initialize = "PASS"
 
-    Start-Sleep -Seconds 5
+    Stop-Process -Id $playniteProcess.Id -Force -ErrorAction Stop
+    $playniteProcess.WaitForExit(10000) | Out-Null
+    Prepare-PlayniteSettings -ConfigPath $configPath -UserData $userData
+    $receipt.phases.bootstrap_config = "PASS"
+
+    $logPath = Join-Path $userData "playnite.log"
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
+    $startMarker = Wait-ForPlayniteStarted -LogPath $logPath -Version $manifest.playnite_version -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds
+    $receipt.playnite.clean_start_oracle = $startMarker
+    $receipt.phases.clean_initialize = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     $receipt.phases.shutdown = "PASS"
 
