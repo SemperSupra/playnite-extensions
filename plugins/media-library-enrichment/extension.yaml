@@ -1,0 +1,6 @@
+Id: 4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377
+Name: Media Library Enrichment
+Author: Mark E. DeYoung
+Version: 0.1.0
+Module: MediaLibraryEnrichment.dll
+Type: GenericPlugin
