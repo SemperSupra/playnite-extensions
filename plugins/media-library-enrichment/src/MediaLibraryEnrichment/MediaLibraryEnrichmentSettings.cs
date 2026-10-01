@@ -8,46 +8,32 @@ namespace MediaLibraryEnrichment
     {
         public string Mode { get; set; } = "observe";
 
-        public static MediaLibraryEnrichmentSettings LoadOrCreate(string path)
+        public static MediaLibraryEnrichmentSettings Load(string path)
         {
             if (!File.Exists(path))
             {
-                var defaults = new MediaLibraryEnrichmentSettings();
-                defaults.Save(path);
-                return defaults;
+                return new MediaLibraryEnrichmentSettings();
             }
 
-            MediaLibraryEnrichmentSettings loaded;
-            Exception error;
-            if (Serialization.TryFromJsonFile(path, out loaded, out error) &&
-                loaded != null)
-            {
-                loaded.Normalize();
-                return loaded;
-            }
+            var settings = Serialization.FromJson<MediaLibraryEnrichmentSettings>(
+                File.ReadAllText(path));
 
-            throw new InvalidDataException(
-                "Media Library Enrichment settings are not valid JSON.",
-                error);
+            return settings ?? new MediaLibraryEnrichmentSettings();
         }
 
-        public void Save(string path)
+        public ProjectionMode ResolveMode()
         {
-            Normalize();
-            File.WriteAllText(path, Serialization.ToJson(this, true));
-        }
-
-        private void Normalize()
-        {
-            var normalized = (Mode ?? string.Empty).Trim().ToLowerInvariant();
-            if (normalized != "observe" &&
-                normalized != "apply" &&
-                normalized != "rollback")
+            if (string.Equals(Mode, "apply", StringComparison.OrdinalIgnoreCase))
             {
-                normalized = "observe";
+                return ProjectionMode.Apply;
             }
 
-            Mode = normalized;
+            if (string.Equals(Mode, "rollback", StringComparison.OrdinalIgnoreCase))
+            {
+                return ProjectionMode.Rollback;
+            }
+
+            return ProjectionMode.Observe;
         }
     }
 }
