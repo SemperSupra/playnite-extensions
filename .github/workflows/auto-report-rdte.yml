@@ -1,0 +1,57 @@
+name: Auto Report Native RDTE
+
+on:
+  pull_request:
+    paths:
+      - "plugins/auto-report/**"
+      - ".github/workflows/auto-report-rdte.yml"
+      - "tooling/rdte/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Materialize deterministic Playnite fixture
+        env:
+          RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RDTE_TRIGGER_SHA: ${{ github.sha }}
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "auto-report-rdte"
+          $runtimeEvidence = Join-Path $evidence "runtime"
+          ./tooling/rdte/probe-playnite-runtime.ps1 `
+            -ManifestPath ./tooling/rdte/playnite-10.62.json `
+            -EvidenceDir $runtimeEvidence `
+            -ExerciseFixtureSeeder
+
+          $workRoots = @(
+            Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
+              Sort-Object LastWriteTimeUtc -Descending
+          )
+          if ($workRoots.Count -lt 1) {
+            throw "Unable to locate the disposable Playnite work root."
+          }
+
+          $workRoot = $workRoots[0].FullName
+          ./plugins/auto-report/tooling/qualify-rdte.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir (Join-Path $evidence "auto-report")
+
+      - name: Upload Auto Report RDTE evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: auto-report-rdte-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/auto-report-rdte
+          if-no-files-found: error
+          retention-days: 7
