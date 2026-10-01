@@ -266,7 +266,8 @@ function Assert-ActionConflictReceipt {
         $value.is_play_action -ne $false -or
         $value.playtime -ne 0 -or
         $value.play_count -ne 0 -or
-        $null -ne $value.last_activity) {
+        $value.last_activity_present -ne $false -or
+        $value.last_activity -ne "") {
         throw "Action conflict fixture did not prove preserved custom-action semantics for '$ExpectedMode'."
     }
 
