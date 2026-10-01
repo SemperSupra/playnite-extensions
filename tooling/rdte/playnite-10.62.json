@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "playnite_version": "10.62",
+  "release_tag": "10.62",
+  "portable_url": "https://github.com/JosefNemec/Playnite/releases/download/10.62/10.62.7z",
+  "portable_sha256": "a31cd00e9942619a1efdc5c8474c3eed20de5f8f1c31f0b1352e336e941e0d1f",
+  "desktop_exe": "Playnite.DesktopApp.exe",
+  "toolbox_exe": "Toolbox.exe"
+}
