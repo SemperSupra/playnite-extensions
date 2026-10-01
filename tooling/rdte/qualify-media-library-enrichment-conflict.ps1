@@ -291,8 +291,9 @@ function Assert-ActionConflictRollback {
 
     $preserved = @($value.Operations | Where-Object Outcome -eq "CONFLICT_ACTION_CHANGED")
     if ($preserved.Count -ne 1 -or
-        $preserved[0].ActionName -ne "Read" -or
-        $preserved[0].Name -ne "RDTE Humble Ebook") {
+        $preserved[0].PlayniteId -ne "73000000-0000-4000-8000-000000000001" -or
+        $preserved[0].SemanticKey -ne "media-open-book" -or
+        $preserved[0].ActionName -ne "Read") {
         throw "Action conflict rollback did not preserve the externally changed Ebook Read action."
     }
 
