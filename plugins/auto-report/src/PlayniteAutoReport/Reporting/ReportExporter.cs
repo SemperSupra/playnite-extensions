@@ -165,10 +165,11 @@ namespace PlayniteAutoReport.Reporting
                 if (result.DeletedFiles > 0)
                 {
                     logger.Debug(
-                        "Pruned {0} history snapshots, {1} files, and {2} bytes.",
-                        result.DeletedSnapshots,
-                        result.DeletedFiles,
-                        result.DeletedBytes);
+                        string.Format(
+                            "Pruned {0} history snapshots, {1} files, and {2} bytes.",
+                            result.DeletedSnapshots,
+                            result.DeletedFiles,
+                            result.DeletedBytes));
                 }
             }
             catch (Exception error)
