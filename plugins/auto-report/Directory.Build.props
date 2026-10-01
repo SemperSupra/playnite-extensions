@@ -3,6 +3,10 @@
     <LangVersion>7.3</LangVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- Git/source revision is recorded in the external qualification receipt.
+         Keeping it out of AssemblyInformationalVersion makes product binaries
+         reproducible across unrelated monorepo/harness commits. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
