@@ -25,6 +25,7 @@ jobs:
         env:
           RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           RDTE_TRIGGER_SHA: ${{ github.sha }}
+          RDTE_PRODUCT_AUTHORITY_SHA: d636c4e3487893ae5edf7442bd8e9dc329649c06
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP "media-library-enrichment-rdte"
@@ -32,7 +33,8 @@ jobs:
           ./tooling/rdte/probe-playnite-runtime.ps1 `
             -ManifestPath ./tooling/rdte/playnite-10.62.json `
             -EvidenceDir $runtimeEvidence `
-            -ExerciseFixtureSeeder
+            -ExerciseFixtureSeeder `
+            -FixtureProfile media-raw-v1
 
           $workRoots = @(
             Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
