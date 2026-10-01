@@ -7,8 +7,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace MediaLibraryEnrichment
 {
@@ -16,6 +14,13 @@ namespace MediaLibraryEnrichment
     {
         public static readonly Guid PluginGuid =
             Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377");
+
+        private static readonly Guid CategoryBook =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1401");
+        private static readonly Guid CategoryComic =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1402");
+        private static readonly Guid CategoryAudio =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1403");
 
         public override Guid Id { get; } = PluginGuid;
 
@@ -30,54 +35,33 @@ namespace MediaLibraryEnrichment
 
         public override void OnApplicationStarted(OnApplicationStartedEventArgs args)
         {
+            var candidates = ObserveCandidates();
             var dataPath = GetPluginUserDataPath();
             Directory.CreateDirectory(dataPath);
 
-            var candidates = CaptureCandidates();
             File.WriteAllText(
                 Path.Combine(dataPath, "observation-receipt.json"),
-                Serialization.ToJson(
-                    new MediaObservationReceipt
-                    {
-                        Schema = "sempersupra-media-library-enrichment-observation/v1",
-                        FixtureContract = "media-raw-v1",
-                        CandidateCount = candidates.Length,
-                        Candidates = candidates
-                    },
-                    true));
+                Serialization.ToJson(new MediaObservationReceipt
+                {
+                    Schema = "sempersupra-media-library-enrichment-observation/v1",
+                    FixtureContract = "media-baseline-v1",
+                    CandidateCount = candidates.Length,
+                    Candidates = candidates
+                }, true));
 
             var settingsPath = Path.Combine(dataPath, "settings.json");
             var ledgerPath = Path.Combine(dataPath, "category-ledger.json");
-            var reconcilePath = Path.Combine(dataPath, "r4i-receipt.json");
+            var receiptPath = Path.Combine(dataPath, "category-receipt.json");
 
-            var settings = MediaLibraryEnrichmentSettings.LoadOrCreate(settingsPath);
-            var ledger = CategoryLedger.LoadOrCreate(ledgerPath);
+            var settings = MediaLibraryEnrichmentSettings.Load(settingsPath);
+            var ledger = LoadLedger(ledgerPath);
+            var receipt = ReconcileCategories(candidates, settings.ResolveMode(), ledger);
 
-            CategoryReconcileReceipt receipt;
-            if (string.Equals(settings.Mode, "apply", StringComparison.Ordinal))
-            {
-                receipt = ApplyCategoryEnrichment(candidates, ledger, ledgerPath);
-            }
-            else if (string.Equals(settings.Mode, "rollback", StringComparison.Ordinal))
-            {
-                receipt = RollbackCategoryEnrichment(ledger, ledgerPath);
-            }
-            else
-            {
-                receipt = new CategoryReconcileReceipt
-                {
-                    Mode = "observe",
-                    CandidateCount = candidates.Length,
-                    PlanSha256 = HashPlan(new CategoryOperationReceipt[0])
-                };
-            }
-
-            File.WriteAllText(
-                reconcilePath,
-                Serialization.ToJson(receipt, true));
+            File.WriteAllText(receiptPath, Serialization.ToJson(receipt, true));
+            File.WriteAllText(ledgerPath, Serialization.ToJson(ledger, true));
         }
 
-        private MediaObservation[] CaptureCandidates()
+        private MediaObservation[] ObserveCandidates()
         {
             return PlayniteApi.Database.Games
                 .Where(game =>
@@ -91,437 +75,151 @@ namespace MediaLibraryEnrichment
                     Name = game.Name ?? string.Empty,
                     Source = game.Source == null ? string.Empty : game.Source.Name ?? string.Empty,
                     Kind = MediaCandidateClassifier.ClassifyKind(game.Manual, game.Notes),
-                    LocalEvidenceName =
-                        MediaCandidateClassifier.NormalizeLocalEvidenceName(game.Manual),
+                    ManualPath = game.Manual ?? string.Empty,
                     CoverMissing = string.IsNullOrWhiteSpace(game.CoverImage)
                 })
                 .OrderBy(item => item.PlayniteId, StringComparer.Ordinal)
                 .ToArray();
         }
 
-        private CategoryReconcileReceipt ApplyCategoryEnrichment(
+        private CategoryProjectionReceipt ReconcileCategories(
             MediaObservation[] candidates,
-            CategoryLedger ledger,
-            string ledgerPath)
+            ProjectionMode mode,
+            CategoryOwnershipLedger ledger)
         {
-            var operations = BuildApplyPlan(candidates);
-            var receipt = new CategoryReconcileReceipt
-            {
-                Mode = "apply",
-                CandidateCount = candidates.Length,
-                PlanSha256 = HashPlan(operations),
-                Operations = operations
-            };
-
-            foreach (var operation in operations)
-            {
-                if (string.Equals(operation.Outcome, "NOOP", StringComparison.Ordinal))
-                {
-                    receipt.NoopCount++;
-                    CommitRecoveredLedgerIfNeeded(operation, ledger, ledgerPath);
-                    continue;
-                }
-
-                if (operation.Outcome.StartsWith("CONFLICT", StringComparison.Ordinal))
-                {
-                    receipt.ConflictCount++;
-                    continue;
-                }
-
-                if (!string.Equals(operation.Outcome, "ADD_MEMBERSHIP", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var gameId = Guid.Parse(operation.PlayniteId);
-                var categoryId = Guid.Parse(operation.CategoryId);
-                var currentGame = PlayniteApi.Database.Games.Get(gameId);
-                if (currentGame == null)
-                {
-                    operation.Outcome = "CONFLICT_GAME_MISSING";
-                    operation.Detail = "Game disappeared before apply.";
-                    receipt.ConflictCount++;
-                    continue;
-                }
-
-                var categories = currentGame.CategoryIds == null
-                    ? new List<Guid>()
-                    : new List<Guid>(currentGame.CategoryIds);
-
-                if (categories.Contains(categoryId))
-                {
-                    operation.Outcome = "PRECONDITION_CHANGED_NOOP";
-                    operation.Detail = "Desired membership appeared before apply.";
-                    receipt.NoopCount++;
-                    CommitRecoveredLedgerIfNeeded(operation, ledger, ledgerPath);
-                    continue;
-                }
-
-                var category = PlayniteApi.Database.Categories.Get(categoryId);
-                var conflictingCategory = PlayniteApi.Database.Categories
-                    .FirstOrDefault(item =>
-                        item.Id != categoryId &&
-                        string.Equals(
-                            item.Name,
-                            operation.CategoryName,
-                            StringComparison.Ordinal));
-
-                if (conflictingCategory != null ||
-                    (category != null &&
-                     !string.Equals(
-                         category.Name,
-                         operation.CategoryName,
-                         StringComparison.Ordinal)))
-                {
-                    operation.Outcome = "CONFLICT_CATEGORY_PRECONDITION";
-                    operation.Detail = "Category identity/name precondition changed before apply.";
-                    receipt.ConflictCount++;
-                    continue;
-                }
-
-                var ledgerEntry = FindLedgerEntry(ledger, operation.PlayniteId, operation.CategoryId);
-                if (ledgerEntry == null)
-                {
-                    ledgerEntry = new CategoryLedgerEntry
-                    {
-                        PlayniteId = operation.PlayniteId,
-                        Kind = operation.Kind,
-                        CategoryId = operation.CategoryId,
-                        CategoryName = operation.CategoryName,
-                        PriorMembership = false,
-                        CategoryCreated = category == null,
-                        Status = "PLANNED"
-                    };
-                    ledger.Entries.Add(ledgerEntry);
-                }
-                else
-                {
-                    ledgerEntry.Status = "PLANNED";
-                }
-
-                ledger.Save(ledgerPath);
-
-                using (PlayniteApi.Database.BufferedUpdate())
-                {
-                    if (category == null)
-                    {
-                        PlayniteApi.Database.Categories.Add(
-                            new Category
-                            {
-                                Id = categoryId,
-                                Name = operation.CategoryName
-                            });
-                    }
-
-                    categories.Add(categoryId);
-                    currentGame.CategoryIds = categories;
-                    PlayniteApi.Database.Games.Update(currentGame);
-                }
-
-                var verifiedGame = PlayniteApi.Database.Games.Get(gameId);
-                if (verifiedGame == null ||
-                    verifiedGame.CategoryIds == null ||
-                    !verifiedGame.CategoryIds.Contains(categoryId))
-                {
-                    operation.Outcome = "FAILED_VERIFY";
-                    operation.Detail = "Category membership was not present after apply.";
-                    throw new InvalidOperationException(operation.Detail);
-                }
-
-                ledgerEntry.Status = "COMMITTED";
-                ledger.Save(ledgerPath);
-
-                operation.Outcome = "APPLIED";
-                operation.Detail = "Category membership applied and verified.";
-                receipt.AppliedCount++;
-            }
-
-            return receipt;
-        }
-
-        private List<CategoryOperationReceipt> BuildApplyPlan(MediaObservation[] candidates)
-        {
-            var operations = new List<CategoryOperationReceipt>();
+            var operations = new List<string>();
+            var applied = 0;
+            var conflicts = 0;
 
             foreach (var candidate in candidates)
             {
-                var spec = CategoryEnrichmentPolicy.ForKind(candidate.Kind);
-                if (spec == null)
+                Guid categoryId;
+                string categoryName;
+                if (!TryResolveCategory(candidate.Kind, out categoryId, out categoryName))
                 {
-                    operations.Add(
-                        new CategoryOperationReceipt
-                        {
-                            PlayniteId = candidate.PlayniteId,
-                            Name = candidate.Name,
-                            Kind = candidate.Kind,
-                            Outcome = "SKIP_UNRESOLVED",
-                            Detail = "No owned category mapping exists for this media kind."
-                        });
                     continue;
                 }
-
-                var operation = new CategoryOperationReceipt
-                {
-                    PlayniteId = candidate.PlayniteId,
-                    Name = candidate.Name,
-                    Kind = candidate.Kind,
-                    CategoryId = spec.CategoryId.ToString(),
-                    CategoryName = spec.CategoryName
-                };
 
                 var gameId = Guid.Parse(candidate.PlayniteId);
                 var game = PlayniteApi.Database.Games.Get(gameId);
                 if (game == null)
                 {
-                    operation.Outcome = "CONFLICT_GAME_MISSING";
-                    operation.Detail = "Game does not exist at plan time.";
-                    operations.Add(operation);
                     continue;
                 }
 
-                var category = PlayniteApi.Database.Categories.Get(spec.CategoryId);
-                var conflictingCategory = PlayniteApi.Database.Categories
-                    .FirstOrDefault(item =>
-                        item.Id != spec.CategoryId &&
-                        string.Equals(item.Name, spec.CategoryName, StringComparison.Ordinal));
-
-                if (conflictingCategory != null ||
-                    (category != null &&
-                     !string.Equals(category.Name, spec.CategoryName, StringComparison.Ordinal)))
-                {
-                    operation.Outcome = "CONFLICT_CATEGORY_IDENTITY";
-                    operation.Detail = "Desired category name or ID is already owned by different state.";
-                    operations.Add(operation);
-                    continue;
-                }
-
-                var membershipPresent =
-                    game.CategoryIds != null &&
-                    game.CategoryIds.Contains(spec.CategoryId);
-
-                operation.Outcome = membershipPresent
-                    ? "NOOP"
-                    : "ADD_MEMBERSHIP";
-                operation.Detail = membershipPresent
-                    ? "Desired membership already present."
-                    : "Missing owned category membership.";
-                operations.Add(operation);
-            }
-
-            return operations
-                .OrderBy(item => item.PlayniteId, StringComparer.Ordinal)
-                .ThenBy(item => item.CategoryId ?? string.Empty, StringComparer.Ordinal)
-                .ToList();
-        }
-
-        private CategoryReconcileReceipt RollbackCategoryEnrichment(
-            CategoryLedger ledger,
-            string ledgerPath)
-        {
-            var committed = ledger.Entries
-                .Where(entry =>
-                    string.Equals(entry.Status, "COMMITTED", StringComparison.Ordinal) ||
-                    string.Equals(entry.Status, "PLANNED", StringComparison.Ordinal))
-                .OrderBy(entry => entry.PlayniteId, StringComparer.Ordinal)
-                .ThenBy(entry => entry.CategoryId, StringComparer.Ordinal)
-                .ToList();
-
-            var operations = committed
-                .Select(entry => new CategoryOperationReceipt
-                {
-                    PlayniteId = entry.PlayniteId,
-                    Kind = entry.Kind,
-                    CategoryId = entry.CategoryId,
-                    CategoryName = entry.CategoryName,
-                    Outcome = "ROLLBACK_MEMBERSHIP",
-                    Detail = "Remove only the membership recorded by the ownership ledger."
-                })
-                .ToList();
-
-            var receipt = new CategoryReconcileReceipt
-            {
-                Mode = "rollback",
-                CandidateCount = committed.Count,
-                PlanSha256 = HashPlan(operations),
-                Operations = operations
-            };
-
-            foreach (var operation in operations)
-            {
-                var entry = FindLedgerEntry(ledger, operation.PlayniteId, operation.CategoryId);
-                var gameId = Guid.Parse(operation.PlayniteId);
-                var categoryId = Guid.Parse(operation.CategoryId);
-                var game = PlayniteApi.Database.Games.Get(gameId);
-
-                if (game == null)
-                {
-                    operation.Outcome = "CONFLICT_GAME_MISSING";
-                    operation.Detail = "Cannot rollback membership because the game no longer exists.";
-                    receipt.ConflictCount++;
-                    continue;
-                }
-
-                var categories = game.CategoryIds == null
-                    ? new List<Guid>()
-                    : new List<Guid>(game.CategoryIds);
-
-                if (!categories.Contains(categoryId))
-                {
-                    operation.Outcome = "ROLLBACK_NOOP";
-                    operation.Detail = "Owned membership is already absent.";
-                    receipt.NoopCount++;
-                    if (entry != null)
-                    {
-                        entry.Status = "ROLLED_BACK";
-                    }
-                    continue;
-                }
-
-                if (entry == null || entry.PriorMembership)
-                {
-                    operation.Outcome = "CONFLICT_OWNERSHIP";
-                    operation.Detail = "Ledger does not authorize removal of this membership.";
-                    receipt.ConflictCount++;
-                    continue;
-                }
-
-                categories.Remove(categoryId);
-                game.CategoryIds = categories;
-                PlayniteApi.Database.Games.Update(game);
-
-                var verifiedGame = PlayniteApi.Database.Games.Get(gameId);
-                if (verifiedGame != null &&
-                    verifiedGame.CategoryIds != null &&
-                    verifiedGame.CategoryIds.Contains(categoryId))
-                {
-                    operation.Outcome = "FAILED_VERIFY";
-                    operation.Detail = "Category membership remained after rollback.";
-                    throw new InvalidOperationException(operation.Detail);
-                }
-
-                entry.Status = "ROLLED_BACK";
-                operation.Outcome = "ROLLBACK_APPLIED";
-                operation.Detail = "Owned membership removed and verified.";
-                receipt.RollbackAppliedCount++;
-            }
-
-            var createdCategories = ledger.Entries
-                .Where(entry => entry.CategoryCreated)
-                .GroupBy(entry => entry.CategoryId, StringComparer.Ordinal)
-                .Select(group => group.First())
-                .ToList();
-
-            foreach (var entry in createdCategories)
-            {
-                var categoryId = Guid.Parse(entry.CategoryId);
                 var category = PlayniteApi.Database.Categories.Get(categoryId);
-                if (category == null)
-                {
-                    continue;
-                }
+                var categoryIdentityMatches =
+                    category == null ||
+                    string.Equals(category.Name, categoryName, StringComparison.Ordinal);
 
-                if (!string.Equals(category.Name, entry.CategoryName, StringComparison.Ordinal))
-                {
-                    receipt.ConflictCount++;
-                    receipt.Operations.Add(
-                        new CategoryOperationReceipt
-                        {
-                            CategoryId = entry.CategoryId,
-                            CategoryName = entry.CategoryName,
-                            Outcome = "CONFLICT_CATEGORY_CHANGED",
-                            Detail = "Category name changed externally; object retained."
-                        });
-                    continue;
-                }
-
-                var inUse = PlayniteApi.Database.Games.Any(game =>
+                var categoryPresent =
                     game.CategoryIds != null &&
-                    game.CategoryIds.Contains(categoryId));
+                    game.CategoryIds.Contains(categoryId);
 
-                if (inUse)
+                var ownedRecord = ledger.Records.FirstOrDefault(record =>
+                    string.Equals(record.PlayniteId, candidate.PlayniteId, StringComparison.Ordinal) &&
+                    string.Equals(record.CategoryId, categoryId.ToString(), StringComparison.OrdinalIgnoreCase));
+
+                var operation = CategoryProjectionPlanner.Plan(
+                    mode,
+                    categoryPresent,
+                    ownedRecord != null,
+                    categoryIdentityMatches);
+
+                if (mode == ProjectionMode.Rollback &&
+                    ownedRecord != null &&
+                    !categoryIdentityMatches)
                 {
-                    receipt.ConflictCount++;
-                    receipt.Operations.Add(
-                        new CategoryOperationReceipt
-                        {
-                            CategoryId = entry.CategoryId,
-                            CategoryName = entry.CategoryName,
-                            Outcome = "CONFLICT_CATEGORY_IN_USE",
-                            Detail = "Category is referenced by other state; object retained."
-                        });
+                    conflicts++;
+                    operations.Add(candidate.Name + ":CONFLICT");
                     continue;
                 }
 
-                var removed = PlayniteApi.Database.Categories.Remove(categoryId);
-                var verifiedCategory = PlayniteApi.Database.Categories.Get(categoryId);
-                if (!removed || verifiedCategory != null)
+                if (operation == CategoryProjectionOperation.Add)
                 {
-                    throw new InvalidOperationException(
-                        "Plugin-created category object remained after rollback.");
-                }
-
-                receipt.Operations.Add(
-                    new CategoryOperationReceipt
+                    if (category == null)
                     {
-                        CategoryId = entry.CategoryId,
-                        CategoryName = entry.CategoryName,
-                        Outcome = "CATEGORY_REMOVED",
-                        Detail = "Plugin-created category object removed and verified after memberships cleared."
+                        PlayniteApi.Database.Categories.Add(new Category
+                        {
+                            Id = categoryId,
+                            Name = categoryName
+                        });
+                    }
+
+                    if (game.CategoryIds == null)
+                    {
+                        game.CategoryIds = new List<Guid>();
+                    }
+
+                    game.CategoryIds.Add(categoryId);
+                    PlayniteApi.Database.Games.Update(game);
+
+                    ledger.Records.Add(new CategoryOwnershipRecord
+                    {
+                        PlayniteId = candidate.PlayniteId,
+                        CategoryId = categoryId.ToString(),
+                        CategoryName = categoryName
                     });
+
+                    applied++;
+                    operations.Add(candidate.Name + ":ADD:" + categoryName);
+                }
+                else if (operation == CategoryProjectionOperation.Remove)
+                {
+                    game.CategoryIds.Remove(categoryId);
+                    PlayniteApi.Database.Games.Update(game);
+                    ledger.Records.Remove(ownedRecord);
+
+                    applied++;
+                    operations.Add(candidate.Name + ":REMOVE:" + categoryName);
+                }
             }
 
-            ledger.Save(ledgerPath);
-            return receipt;
+            return new CategoryProjectionReceipt
+            {
+                Mode = mode.ToString().ToLowerInvariant(),
+                CandidateCount = candidates.Length,
+                PlannedOperationCount = operations.Count,
+                AppliedOperationCount = applied,
+                ConflictCount = conflicts,
+                Operations = operations.ToArray()
+            };
         }
 
-        private void CommitRecoveredLedgerIfNeeded(
-            CategoryOperationReceipt operation,
-            CategoryLedger ledger,
-            string ledgerPath)
+        private static CategoryOwnershipLedger LoadLedger(string path)
         {
-            if (string.IsNullOrWhiteSpace(operation.CategoryId))
+            if (!File.Exists(path))
             {
-                return;
+                return new CategoryOwnershipLedger();
             }
 
-            var entry = FindLedgerEntry(ledger, operation.PlayniteId, operation.CategoryId);
-            if (entry != null &&
-                string.Equals(entry.Status, "PLANNED", StringComparison.Ordinal))
-            {
-                entry.Status = "COMMITTED";
-                ledger.Save(ledgerPath);
-            }
+            return Serialization.FromJson<CategoryOwnershipLedger>(
+                File.ReadAllText(path)) ?? new CategoryOwnershipLedger();
         }
 
-        private static CategoryLedgerEntry FindLedgerEntry(
-            CategoryLedger ledger,
-            string playniteId,
-            string categoryId)
+        private static bool TryResolveCategory(
+            string kind,
+            out Guid categoryId,
+            out string categoryName)
         {
-            return ledger.Entries.FirstOrDefault(entry =>
-                string.Equals(entry.PlayniteId, playniteId, StringComparison.Ordinal) &&
-                string.Equals(entry.CategoryId, categoryId, StringComparison.Ordinal));
-        }
-
-        private static string HashPlan(IEnumerable<CategoryOperationReceipt> operations)
-        {
-            var material = string.Join(
-                "\n",
-                operations
-                    .OrderBy(item => item.PlayniteId ?? string.Empty, StringComparer.Ordinal)
-                    .ThenBy(item => item.CategoryId ?? string.Empty, StringComparer.Ordinal)
-                    .Select(item => string.Join(
-                        "|",
-                        item.PlayniteId ?? string.Empty,
-                        item.Kind ?? string.Empty,
-                        item.CategoryId ?? string.Empty,
-                        item.CategoryName ?? string.Empty,
-                        item.Outcome ?? string.Empty)));
-
-            using (var sha = SHA256.Create())
+            switch (kind)
             {
-                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(material));
-                return string.Concat(hash.Select(item => item.ToString("x2")));
+                case "book":
+                    categoryId = CategoryBook;
+                    categoryName = "SemperSupra.Media:Book";
+                    return true;
+                case "comic":
+                    categoryId = CategoryComic;
+                    categoryName = "SemperSupra.Media:Comic";
+                    return true;
+                case "audio":
+                    categoryId = CategoryAudio;
+                    categoryName = "SemperSupra.Media:Audio";
+                    return true;
+                default:
+                    categoryId = Guid.Empty;
+                    categoryName = null;
+                    return false;
             }
         }
     }
