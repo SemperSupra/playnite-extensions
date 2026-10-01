@@ -6,6 +6,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$EvidenceDir,
 
+    [switch]$KeepInstalledForConflict,
+
     [int]$StartupTimeoutSeconds = 45
 )
 
@@ -492,6 +494,13 @@ try {
     $receipt.phases.idempotent_rollback = "PASS"
 
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
+
+    if ($KeepInstalledForConflict) {
+        $receipt.phases.native_uninstall = "DEFERRED_TO_CONFLICT"
+        $receipt.phases.data_preservation = "DEFERRED_TO_CONFLICT"
+        $receipt.result = "PASS"
+        return
+    }
 
     $uninstallQueue = @([ordered]@{ InstallType = 1; Path = $installedDir })
     ConvertTo-Json -InputObject $uninstallQueue -Depth 4 |
