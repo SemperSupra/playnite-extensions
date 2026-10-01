@@ -377,7 +377,12 @@ namespace SemperSupraRdteSeeder
                         is_play_action = currentAction != null && currentAction.IsPlayAction,
                         playtime = current == null ? 0UL : current.Playtime,
                         play_count = current == null ? 0UL : current.PlayCount,
-                        last_activity = current == null ? null : current.LastActivity,
+                        last_activity_present =
+                            current != null && current.LastActivity.HasValue,
+                        last_activity =
+                            current != null && current.LastActivity.HasValue
+                                ? current.LastActivity.Value.ToString("o")
+                                : string.Empty,
                         detail = detail
                     },
                     true));
