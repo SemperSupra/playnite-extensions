@@ -193,6 +193,12 @@ try {
         Copy-Item $item.Source (Join-Path $stageDir $item.Name) -Force
     }
 
+    $normalizedStageTimestampUtc = [DateTime]::new(2000, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+    foreach ($file in @(Get-ChildItem $stageDir -File)) {
+        $file.LastWriteTimeUtc = $normalizedStageTimestampUtc
+    }
+    $receipt.normalized_stage_timestamp_utc = $normalizedStageTimestampUtc.ToString("o")
+
     $stagedNames = @(Get-ChildItem $stageDir -File | ForEach-Object Name | Sort-Object)
     $expectedNames = @("PlayniteAutoReport.Core.dll", "PlayniteAutoReport.dll", "extension.yaml")
     if (@(Compare-Object $expectedNames $stagedNames).Count -ne 0) {
@@ -203,6 +209,7 @@ try {
             [ordered]@{
                 name = $_.Name
                 sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                last_write_time_utc = $_.LastWriteTimeUtc.ToString("o")
             }
         }
     )
