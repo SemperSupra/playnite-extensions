@@ -513,8 +513,8 @@ try {
         }
 
         $queuePath = Join-Path $userData "extinstalls.json"
-        @([ordered]@{ InstallType = 0; Path = $seederPext }) |
-            ConvertTo-Json -Depth 4 |
+        $seederInstallQueue = @([ordered]@{ InstallType = 0; Path = $seederPext })
+        ConvertTo-Json -InputObject $seederInstallQueue -Depth 4 |
             Set-Content -Path $queuePath -Encoding UTF8
 
         if (Test-Path $logPath) { Remove-Item $logPath -Force }
@@ -592,8 +592,8 @@ try {
         Stop-Playnite -DesktopExe $desktopExe -UserData $userData
         $receipt.phases.fixture_idempotence = "PASS"
 
-        @([ordered]@{ InstallType = 1; Path = $seederInstalledDir }) |
-            ConvertTo-Json -Depth 4 |
+        $seederUninstallQueue = @([ordered]@{ InstallType = 1; Path = $seederInstalledDir })
+        ConvertTo-Json -InputObject $seederUninstallQueue -Depth 4 |
             Set-Content -Path $queuePath -Encoding UTF8
 
         if (Test-Path $logPath) { Remove-Item $logPath -Force }
