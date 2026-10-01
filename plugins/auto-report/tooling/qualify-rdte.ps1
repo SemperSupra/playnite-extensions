@@ -133,7 +133,8 @@ function Read-PextManifest {
 
 $receipt = [ordered]@{
     schema = "sempersupra-auto-report-rdte/v1"
-    source_sha = $env:GITHUB_SHA
+    source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
+    trigger_sha = if ($env:RDTE_TRIGGER_SHA) { $env:RDTE_TRIGGER_SHA } else { $env:GITHUB_SHA }
     plugin_id = $pluginId
     plugin_name = $pluginName
     phases = [ordered]@{
