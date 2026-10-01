@@ -304,12 +304,13 @@ $receipt = [ordered]@{
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
     product_authority_sha = $env:RDTE_PRODUCT_AUTHORITY_SHA
     phases = [ordered]@{
-        product_reinstall = "NOT_RUN"
+        product_present = "NOT_RUN"
         reapply = "NOT_RUN"
         external_conflict_inject = "NOT_RUN"
         conflict_rollback = "NOT_RUN"
         external_conflict_verify = "NOT_RUN"
         product_uninstall = "NOT_RUN"
+        data_preservation = "NOT_RUN"
     }
     result = "RUNNING"
 }
@@ -343,16 +344,23 @@ try {
     }
     $seederVersion = $seederVersionMatch.Groups["value"].Value.Trim()
 
+    $productInstalledDir = Find-InstalledExtension -ExpectedId $pluginId
+    if (-not $productInstalledDir) {
+        throw "Media Library Enrichment was not left installed for the conflict rep."
+    }
+    $receipt.phases.product_present = "PASS"
+
     Set-ProductMode -Mode "apply"
     $r4iPath = Join-Path $userData "ExtensionsData\$pluginId\r4i-receipt.json"
     if (Test-Path $r4iPath) {
         Remove-Item $r4iPath -Force
     }
-
-    $install = Native-InstallAndRun -PackagePath $pluginPackage -ExpectedId $pluginId -ExpectedName $pluginName -ExpectedVersion $productVersion -ReadyFile $r4iPath
-    $productProcess = $install.Process
-    $productInstalledDir = $install.InstalledDir
-    $receipt.phases.product_reinstall = "PASS"
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $r4iPath -Process $productProcess
 
     $reapply = Assert-Reapply -Path $r4iPath
     $receipt.reapply_plan_sha256 = $reapply.PlanSha256
@@ -416,6 +424,14 @@ try {
 
     Native-Uninstall -InstalledDir $productInstalledDir
     $receipt.phases.product_uninstall = "PASS"
+
+    $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
+    foreach ($name in @("settings.json", "observation-receipt.json", "r4i-receipt.json", "category-ledger.json")) {
+        if (-not (Test-Path (Join-Path $pluginData $name) -PathType Leaf)) {
+            throw "Persistent plugin data did not survive final native uninstall: $name"
+        }
+    }
+    $receipt.phases.data_preservation = "PASS"
 
     $receipt.result = "PASS"
 }
