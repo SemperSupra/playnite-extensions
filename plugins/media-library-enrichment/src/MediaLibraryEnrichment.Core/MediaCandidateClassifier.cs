@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 
 namespace MediaLibraryEnrichment
 {
@@ -21,6 +20,20 @@ namespace MediaLibraryEnrichment
             return ClassifyText(notes);
         }
 
+        public static string NormalizeLocalEvidenceName(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            var normalized = path.Replace('\\', '/');
+            var separator = normalized.LastIndexOf('/');
+            return separator >= 0
+                ? normalized.Substring(separator + 1)
+                : normalized;
+        }
+
         private static bool IsHumbleSource(string sourceName)
         {
             return !string.IsNullOrWhiteSpace(sourceName) &&
@@ -34,7 +47,10 @@ namespace MediaLibraryEnrichment
                 return "unresolved";
             }
 
-            return ClassifyExtension(Path.GetExtension(path));
+            var name = NormalizeLocalEvidenceName(path);
+            var extensionIndex = name.LastIndexOf('.');
+            var extension = extensionIndex >= 0 ? name.Substring(extensionIndex) : string.Empty;
+            return ClassifyExtension(extension);
         }
 
         private static string ClassifyText(string text)
@@ -97,7 +113,7 @@ namespace MediaLibraryEnrichment
         public string Name { get; set; }
         public string Source { get; set; }
         public string Kind { get; set; }
-        public string ManualPath { get; set; }
+        public string LocalEvidenceName { get; set; }
         public bool CoverMissing { get; set; }
     }
 
