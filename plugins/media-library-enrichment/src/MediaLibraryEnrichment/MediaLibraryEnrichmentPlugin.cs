@@ -451,14 +451,21 @@ namespace MediaLibraryEnrichment
                     continue;
                 }
 
-                PlayniteApi.Database.Categories.Remove(categoryId);
+                var removed = PlayniteApi.Database.Categories.Remove(categoryId);
+                var verifiedCategory = PlayniteApi.Database.Categories.Get(categoryId);
+                if (!removed || verifiedCategory != null)
+                {
+                    throw new InvalidOperationException(
+                        "Plugin-created category object remained after rollback.");
+                }
+
                 receipt.Operations.Add(
                     new CategoryOperationReceipt
                     {
                         CategoryId = entry.CategoryId,
                         CategoryName = entry.CategoryName,
                         Outcome = "CATEGORY_REMOVED",
-                        Detail = "Plugin-created category object removed after memberships cleared."
+                        Detail = "Plugin-created category object removed and verified after memberships cleared."
                     });
             }
 
