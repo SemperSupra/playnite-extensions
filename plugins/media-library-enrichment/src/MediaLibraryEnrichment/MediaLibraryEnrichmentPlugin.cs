@@ -5,6 +5,7 @@ using Playnite.SDK.Models;
 using Playnite.SDK.Plugins;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -49,9 +50,12 @@ namespace MediaLibraryEnrichment
             var settingsPath = Path.Combine(dataPath, "settings.json");
             var ledgerPath = Path.Combine(dataPath, "category-ledger.json");
             var reconcilePath = Path.Combine(dataPath, "r4i-receipt.json");
+            var actionLedgerPath = Path.Combine(dataPath, "action-ledger.json");
+            var actionReconcilePath = Path.Combine(dataPath, "action-r4i-receipt.json");
 
             var settings = MediaLibraryEnrichmentSettings.LoadOrCreate(settingsPath);
             var ledger = CategoryLedger.LoadOrCreate(ledgerPath);
+            var actionLedger = ActionLedger.LoadOrCreate(actionLedgerPath);
 
             CategoryReconcileReceipt receipt;
             if (string.Equals(settings.Mode, "apply", StringComparison.Ordinal))
@@ -75,6 +79,34 @@ namespace MediaLibraryEnrichment
             File.WriteAllText(
                 reconcilePath,
                 Serialization.ToJson(receipt, true));
+
+            ActionReconcileReceipt actionReceipt;
+            if (string.Equals(settings.Mode, "apply", StringComparison.Ordinal))
+            {
+                actionReceipt = ApplyActionEnrichment(
+                    candidates,
+                    actionLedger,
+                    actionLedgerPath);
+            }
+            else if (string.Equals(settings.Mode, "rollback", StringComparison.Ordinal))
+            {
+                actionReceipt = RollbackActionEnrichment(
+                    actionLedger,
+                    actionLedgerPath);
+            }
+            else
+            {
+                actionReceipt = new ActionReconcileReceipt
+                {
+                    Mode = "observe",
+                    CandidateCount = candidates.Length,
+                    PlanSha256 = HashActionPlan(new ActionOperationReceipt[0])
+                };
+            }
+
+            File.WriteAllText(
+                actionReconcilePath,
+                Serialization.ToJson(actionReceipt, true));
         }
 
         private MediaObservation[] CaptureCandidates()
@@ -501,6 +533,423 @@ namespace MediaLibraryEnrichment
             return ledger.Entries.FirstOrDefault(entry =>
                 string.Equals(entry.PlayniteId, playniteId, StringComparison.Ordinal) &&
                 string.Equals(entry.CategoryId, categoryId, StringComparison.Ordinal));
+        }
+
+        private ActionReconcileReceipt ApplyActionEnrichment(
+            MediaObservation[] candidates,
+            ActionLedger ledger,
+            string ledgerPath)
+        {
+            var operations = BuildActionApplyPlan(candidates);
+            var receipt = new ActionReconcileReceipt
+            {
+                Mode = "apply",
+                CandidateCount = candidates.Length,
+                PlanSha256 = HashActionPlan(operations),
+                Operations = operations
+            };
+
+            foreach (var operation in operations)
+            {
+                if (string.Equals(operation.Outcome, "NOOP", StringComparison.Ordinal))
+                {
+                    receipt.NoopCount++;
+                    CommitRecoveredActionLedgerIfNeeded(operation, ledger, ledgerPath);
+                    continue;
+                }
+
+                if (operation.Outcome.StartsWith("CONFLICT", StringComparison.Ordinal))
+                {
+                    receipt.ConflictCount++;
+                    continue;
+                }
+
+                if (!string.Equals(operation.Outcome, "ADD_ACTION", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var game = PlayniteApi.Database.Games.Get(Guid.Parse(operation.PlayniteId));
+                if (game == null)
+                {
+                    operation.Outcome = "CONFLICT_GAME_MISSING";
+                    operation.Detail = "Game disappeared before action apply.";
+                    receipt.ConflictCount++;
+                    continue;
+                }
+
+                var spec = ActionEnrichmentPolicy.ForKind(operation.Kind);
+                var evidencePath = MediaCandidateClassifier.ResolveLocalEvidencePath(
+                    game.Manual,
+                    game.Notes);
+                if (spec == null || string.IsNullOrWhiteSpace(evidencePath) || !File.Exists(evidencePath))
+                {
+                    operation.Outcome = "CONFLICT_EVIDENCE_CHANGED";
+                    operation.Detail = "Local media evidence changed before action apply.";
+                    receipt.ConflictCount++;
+                    continue;
+                }
+
+                var actions = game.GameActions == null
+                    ? new ObservableCollection<GameAction>()
+                    : new ObservableCollection<GameAction>(game.GameActions);
+
+                if (actions.Any(action => ActionMatchesDesired(action, spec, evidencePath)))
+                {
+                    operation.Outcome = "PRECONDITION_CHANGED_NOOP";
+                    operation.Detail = "Desired action appeared before apply.";
+                    receipt.NoopCount++;
+                    CommitRecoveredActionLedgerIfNeeded(operation, ledger, ledgerPath);
+                    continue;
+                }
+
+                if (actions.Any(action =>
+                    string.Equals(action.Name, spec.ActionName, StringComparison.Ordinal)))
+                {
+                    operation.Outcome = "CONFLICT_ACTION_NAME";
+                    operation.Detail = "Same-name external action appeared before apply.";
+                    receipt.ConflictCount++;
+                    continue;
+                }
+
+                var workingDir = Path.GetDirectoryName(evidencePath) ?? string.Empty;
+                var ledgerEntry = FindActionLedgerEntry(
+                    ledger,
+                    operation.PlayniteId,
+                    operation.SemanticKey);
+
+                if (ledgerEntry == null)
+                {
+                    ledgerEntry = new ActionLedgerEntry
+                    {
+                        PlayniteId = operation.PlayniteId,
+                        Kind = operation.Kind,
+                        SemanticKey = operation.SemanticKey,
+                        ActionName = spec.ActionName,
+                        Path = evidencePath,
+                        WorkingDir = workingDir,
+                        LocalEvidenceName = operation.LocalEvidenceName,
+                        Status = "PLANNED"
+                    };
+                    ledger.Entries.Add(ledgerEntry);
+                }
+                else
+                {
+                    ledgerEntry.Path = evidencePath;
+                    ledgerEntry.WorkingDir = workingDir;
+                    ledgerEntry.Status = "PLANNED";
+                }
+
+                ledger.Save(ledgerPath);
+
+                actions.Add(new GameAction
+                {
+                    Type = GameActionType.File,
+                    Name = spec.ActionName,
+                    Path = evidencePath,
+                    WorkingDir = workingDir,
+                    Arguments = string.Empty,
+                    IsPlayAction = false,
+                    TrackingMode = TrackingMode.Default
+                });
+
+                game.GameActions = actions;
+                PlayniteApi.Database.Games.Update(game);
+
+                var verified = PlayniteApi.Database.Games.Get(game.Id);
+                if (verified == null ||
+                    verified.GameActions == null ||
+                    !verified.GameActions.Any(action =>
+                        ActionMatchesDesired(action, spec, evidencePath)))
+                {
+                    operation.Outcome = "FAILED_VERIFY";
+                    operation.Detail = "Custom media action was not present after apply.";
+                    throw new InvalidOperationException(operation.Detail);
+                }
+
+                ledgerEntry.Status = "COMMITTED";
+                ledger.Save(ledgerPath);
+
+                operation.Outcome = "APPLIED";
+                operation.Detail = "Custom media action applied and verified.";
+                receipt.AppliedCount++;
+            }
+
+            return receipt;
+        }
+
+        private List<ActionOperationReceipt> BuildActionApplyPlan(
+            MediaObservation[] candidates)
+        {
+            var operations = new List<ActionOperationReceipt>();
+
+            foreach (var candidate in candidates)
+            {
+                var spec = ActionEnrichmentPolicy.ForKind(candidate.Kind);
+                if (spec == null)
+                {
+                    continue;
+                }
+
+                var operation = new ActionOperationReceipt
+                {
+                    PlayniteId = candidate.PlayniteId,
+                    Name = candidate.Name,
+                    Kind = candidate.Kind,
+                    SemanticKey = spec.SemanticKey,
+                    ActionName = spec.ActionName,
+                    LocalEvidenceName = candidate.LocalEvidenceName,
+                    IsPlayAction = false
+                };
+
+                var game = PlayniteApi.Database.Games.Get(Guid.Parse(candidate.PlayniteId));
+                if (game == null)
+                {
+                    operation.Outcome = "CONFLICT_GAME_MISSING";
+                    operation.Detail = "Game does not exist at plan time.";
+                    operations.Add(operation);
+                    continue;
+                }
+
+                var evidencePath = MediaCandidateClassifier.ResolveLocalEvidencePath(
+                    game.Manual,
+                    game.Notes);
+                if (string.IsNullOrWhiteSpace(evidencePath) || !File.Exists(evidencePath))
+                {
+                    operation.Outcome = "CONFLICT_EVIDENCE_MISSING";
+                    operation.Detail = "No usable local media evidence exists.";
+                    operations.Add(operation);
+                    continue;
+                }
+
+                operation.LocalEvidenceName =
+                    MediaCandidateClassifier.NormalizeLocalEvidenceName(evidencePath);
+
+                var actions = game.GameActions ?? new ObservableCollection<GameAction>();
+                if (actions.Any(action => ActionMatchesDesired(action, spec, evidencePath)))
+                {
+                    operation.Outcome = "NOOP";
+                    operation.Detail = "Desired custom action already exists.";
+                }
+                else if (actions.Any(action =>
+                    string.Equals(action.Name, spec.ActionName, StringComparison.Ordinal)))
+                {
+                    operation.Outcome = "CONFLICT_ACTION_NAME";
+                    operation.Detail = "Same-name action exists with different state.";
+                }
+                else
+                {
+                    operation.Outcome = "ADD_ACTION";
+                    operation.Detail = "Missing owned custom media action.";
+                }
+
+                operations.Add(operation);
+            }
+
+            return operations
+                .OrderBy(item => item.PlayniteId, StringComparer.Ordinal)
+                .ThenBy(item => item.SemanticKey ?? string.Empty, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private ActionReconcileReceipt RollbackActionEnrichment(
+            ActionLedger ledger,
+            string ledgerPath)
+        {
+            var committed = ledger.Entries
+                .Where(entry =>
+                    string.Equals(entry.Status, "COMMITTED", StringComparison.Ordinal) ||
+                    string.Equals(entry.Status, "PLANNED", StringComparison.Ordinal))
+                .OrderBy(entry => entry.PlayniteId, StringComparer.Ordinal)
+                .ThenBy(entry => entry.SemanticKey, StringComparer.Ordinal)
+                .ToList();
+
+            var operations = committed
+                .Select(entry => new ActionOperationReceipt
+                {
+                    PlayniteId = entry.PlayniteId,
+                    Kind = entry.Kind,
+                    SemanticKey = entry.SemanticKey,
+                    ActionName = entry.ActionName,
+                    LocalEvidenceName = entry.LocalEvidenceName,
+                    IsPlayAction = false,
+                    Outcome = "ROLLBACK_ACTION",
+                    Detail = "Remove only the exact action recorded by the ownership ledger."
+                })
+                .ToList();
+
+            var receipt = new ActionReconcileReceipt
+            {
+                Mode = "rollback",
+                CandidateCount = committed.Count,
+                PlanSha256 = HashActionPlan(operations),
+                Operations = operations
+            };
+
+            foreach (var operation in operations)
+            {
+                var entry = FindActionLedgerEntry(
+                    ledger,
+                    operation.PlayniteId,
+                    operation.SemanticKey);
+                var game = PlayniteApi.Database.Games.Get(Guid.Parse(operation.PlayniteId));
+                if (game == null)
+                {
+                    operation.Outcome = "CONFLICT_GAME_MISSING";
+                    operation.Detail = "Cannot rollback action because the game no longer exists.";
+                    receipt.ConflictCount++;
+                    continue;
+                }
+
+                var actions = game.GameActions == null
+                    ? new ObservableCollection<GameAction>()
+                    : new ObservableCollection<GameAction>(game.GameActions);
+
+                var exact = actions.FirstOrDefault(action =>
+                    ActionMatchesLedger(action, entry));
+
+                if (exact == null)
+                {
+                    var sameName = actions.Any(action =>
+                        string.Equals(
+                            action.Name,
+                            entry == null ? operation.ActionName : entry.ActionName,
+                            StringComparison.Ordinal));
+
+                    if (sameName)
+                    {
+                        operation.Outcome = "CONFLICT_ACTION_CHANGED";
+                        operation.Detail = "Owned action changed externally; preserved.";
+                        receipt.ConflictCount++;
+                        continue;
+                    }
+
+                    operation.Outcome = "ROLLBACK_NOOP";
+                    operation.Detail = "Owned action is already absent.";
+                    receipt.NoopCount++;
+                    if (entry != null)
+                    {
+                        entry.Status = "ROLLED_BACK";
+                    }
+                    continue;
+                }
+
+                actions.Remove(exact);
+                game.GameActions = actions;
+                PlayniteApi.Database.Games.Update(game);
+
+                var verified = PlayniteApi.Database.Games.Get(game.Id);
+                if (verified != null &&
+                    verified.GameActions != null &&
+                    verified.GameActions.Any(action =>
+                        ActionMatchesLedger(action, entry)))
+                {
+                    operation.Outcome = "FAILED_VERIFY";
+                    operation.Detail = "Owned action remained after rollback.";
+                    throw new InvalidOperationException(operation.Detail);
+                }
+
+                entry.Status = "ROLLED_BACK";
+                operation.Outcome = "ROLLBACK_APPLIED";
+                operation.Detail = "Owned custom action removed and verified.";
+                receipt.RollbackAppliedCount++;
+            }
+
+            ledger.Save(ledgerPath);
+            return receipt;
+        }
+
+        private static bool ActionMatchesDesired(
+            GameAction action,
+            ActionEnrichmentSpec spec,
+            string evidencePath)
+        {
+            if (action == null || spec == null)
+            {
+                return false;
+            }
+
+            return action.Type == GameActionType.File &&
+                !action.IsPlayAction &&
+                string.Equals(action.Name, spec.ActionName, StringComparison.Ordinal) &&
+                string.Equals(action.Path, evidencePath, StringComparison.Ordinal) &&
+                string.Equals(
+                    action.WorkingDir ?? string.Empty,
+                    Path.GetDirectoryName(evidencePath) ?? string.Empty,
+                    StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(action.Arguments);
+        }
+
+        private static bool ActionMatchesLedger(
+            GameAction action,
+            ActionLedgerEntry entry)
+        {
+            if (action == null || entry == null)
+            {
+                return false;
+            }
+
+            return action.Type == GameActionType.File &&
+                !action.IsPlayAction &&
+                string.Equals(action.Name, entry.ActionName, StringComparison.Ordinal) &&
+                string.Equals(action.Path, entry.Path, StringComparison.Ordinal) &&
+                string.Equals(
+                    action.WorkingDir ?? string.Empty,
+                    entry.WorkingDir ?? string.Empty,
+                    StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(action.Arguments);
+        }
+
+        private void CommitRecoveredActionLedgerIfNeeded(
+            ActionOperationReceipt operation,
+            ActionLedger ledger,
+            string ledgerPath)
+        {
+            var entry = FindActionLedgerEntry(
+                ledger,
+                operation.PlayniteId,
+                operation.SemanticKey);
+            if (entry != null &&
+                string.Equals(entry.Status, "PLANNED", StringComparison.Ordinal))
+            {
+                entry.Status = "COMMITTED";
+                ledger.Save(ledgerPath);
+            }
+        }
+
+        private static ActionLedgerEntry FindActionLedgerEntry(
+            ActionLedger ledger,
+            string playniteId,
+            string semanticKey)
+        {
+            return ledger.Entries.FirstOrDefault(entry =>
+                string.Equals(entry.PlayniteId, playniteId, StringComparison.Ordinal) &&
+                string.Equals(entry.SemanticKey, semanticKey, StringComparison.Ordinal));
+        }
+
+        private static string HashActionPlan(
+            IEnumerable<ActionOperationReceipt> operations)
+        {
+            var material = string.Join(
+                "\n",
+                operations
+                    .OrderBy(item => item.PlayniteId ?? string.Empty, StringComparer.Ordinal)
+                    .ThenBy(item => item.SemanticKey ?? string.Empty, StringComparer.Ordinal)
+                    .Select(item => string.Join(
+                        "|",
+                        item.PlayniteId ?? string.Empty,
+                        item.Kind ?? string.Empty,
+                        item.SemanticKey ?? string.Empty,
+                        item.ActionName ?? string.Empty,
+                        item.LocalEvidenceName ?? string.Empty,
+                        item.IsPlayAction ? "play" : "custom",
+                        item.Outcome ?? string.Empty)));
+
+            using (var sha = SHA256.Create())
+            {
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(material));
+                return string.Concat(hash.Select(item => item.ToString("x2")));
+            }
         }
 
         private static string HashPlan(IEnumerable<CategoryOperationReceipt> operations)
