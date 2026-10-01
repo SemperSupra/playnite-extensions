@@ -40,6 +40,15 @@ namespace SemperSupraRdteSeeder
             var fixturePath = Path.Combine(dataPath, "media");
             Directory.CreateDirectory(fixturePath);
 
+            var profilePath = Path.Combine(dataPath, "fixture-profile.txt");
+            var fixtureProfile = File.Exists(profilePath)
+                ? File.ReadAllText(profilePath).Trim()
+                : "media-baseline-v1";
+            var rawMediaProfile = string.Equals(
+                fixtureProfile,
+                "media-raw-v1",
+                StringComparison.OrdinalIgnoreCase);
+
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
             var cbzPath = Path.Combine(fixturePath, "rdte-comic.cbz");
@@ -54,18 +63,21 @@ namespace SemperSupraRdteSeeder
             {
                 EnsureMetadata(PlayniteApi.Database.Sources, new GameSource { Id = SourceHumble, Name = "Humble Bundle RDTE" });
                 EnsureMetadata(PlayniteApi.Database.Sources, new GameSource { Id = SourceManual, Name = "Manual RDTE" });
-                EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryBook, Name = "Media: Book" });
-                EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryComic, Name = "Media: Comic" });
-                EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryAudio, Name = "Media: Audio" });
-                EnsureMetadata(PlayniteApi.Database.Series, new Series { Id = SeriesMedia, Name = "RDTE Media Series" });
+                if (!rawMediaProfile)
+                {
+                    EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryBook, Name = "Media: Book" });
+                    EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryComic, Name = "Media: Comic" });
+                    EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryAudio, Name = "Media: Audio" });
+                    EnsureMetadata(PlayniteApi.Database.Series, new Series { Id = SeriesMedia, Name = "RDTE Media Series" });
+                }
 
                 UpsertGame(new Game("RDTE Humble Ebook")
                 {
                     Id = GameBook,
                     GameId = "rdte-humble-ebook",
                     SourceId = SourceHumble,
-                    CategoryIds = new List<Guid> { CategoryBook },
-                    SeriesIds = new List<Guid> { SeriesMedia },
+                    CategoryIds = rawMediaProfile ? null : new List<Guid> { CategoryBook },
+                    SeriesIds = rawMediaProfile ? null : new List<Guid> { SeriesMedia },
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -79,8 +91,8 @@ namespace SemperSupraRdteSeeder
                     Id = GameComic,
                     GameId = "rdte-humble-comic",
                     SourceId = SourceHumble,
-                    CategoryIds = new List<Guid> { CategoryComic },
-                    SeriesIds = new List<Guid> { SeriesMedia },
+                    CategoryIds = rawMediaProfile ? null : new List<Guid> { CategoryComic },
+                    SeriesIds = rawMediaProfile ? null : new List<Guid> { SeriesMedia },
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -94,7 +106,7 @@ namespace SemperSupraRdteSeeder
                     Id = GameAudio,
                     GameId = "rdte-humble-soundtrack",
                     SourceId = SourceHumble,
-                    CategoryIds = new List<Guid> { CategoryAudio },
+                    CategoryIds = rawMediaProfile ? null : new List<Guid> { CategoryAudio },
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -122,7 +134,7 @@ namespace SemperSupraRdteSeeder
             var receipt = new
             {
                 schema = "sempersupra-playnite-fixture-seed/v1",
-                fixture_set = "media-baseline-v1",
+                fixture_set = fixtureProfile,
                 expected_fixture_games = FixtureGameIds.Length,
                 observed_fixture_games = present.Count,
                 fixture_game_ids = FixtureGameIds.Select(id => id.ToString()).ToArray(),
