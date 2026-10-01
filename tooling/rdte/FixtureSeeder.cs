@@ -21,6 +21,9 @@ namespace SemperSupraRdteSeeder
         private static readonly Guid CategoryComic = Guid.Parse("71000000-0000-4000-8000-000000000002");
         private static readonly Guid CategoryAudio = Guid.Parse("71000000-0000-4000-8000-000000000003");
         private static readonly Guid SeriesMedia = Guid.Parse("72000000-0000-4000-8000-000000000001");
+        private static readonly Guid EnrichmentCategoryBook =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1401");
+        private const string EnrichmentCategoryBookName = "SemperSupra.Media:Book";
 
         private static readonly Guid GameBook = Guid.Parse("73000000-0000-4000-8000-000000000001");
         private static readonly Guid GameComic = Guid.Parse("73000000-0000-4000-8000-000000000002");
@@ -48,6 +51,19 @@ namespace SemperSupraRdteSeeder
                 fixtureProfile,
                 "media-raw-v1",
                 StringComparison.OrdinalIgnoreCase);
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunR4IConflictFixture(dataPath, fixtureProfile);
+                return;
+            }
 
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
@@ -145,6 +161,99 @@ namespace SemperSupraRdteSeeder
             File.WriteAllText(
                 Path.Combine(dataPath, "seed-receipt.json"),
                 Serialization.ToJson(receipt, true));
+        }
+
+        private void RunR4IConflictFixture(string dataPath, string fixtureProfile)
+        {
+            var category = PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+            var game = PlayniteApi.Database.Games.Get(GameManual);
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                if (category == null ||
+                    !string.Equals(
+                        category.Name,
+                        EnrichmentCategoryBookName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected plugin-owned Book category is unavailable or renamed.");
+                }
+
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Manual control game is unavailable.");
+                }
+
+                if (apply)
+                {
+                    var categories = game.CategoryIds == null
+                        ? new List<Guid>()
+                        : new List<Guid>(game.CategoryIds);
+
+                    if (!categories.Contains(EnrichmentCategoryBook))
+                    {
+                        categories.Add(EnrichmentCategoryBook);
+                        game.CategoryIds = categories;
+                        PlayniteApi.Database.Games.Update(game);
+                    }
+                }
+
+                var verified = PlayniteApi.Database.Games.Get(GameManual);
+                var membershipPresent =
+                    verified != null &&
+                    verified.CategoryIds != null &&
+                    verified.CategoryIds.Contains(EnrichmentCategoryBook);
+
+                if (!membershipPresent)
+                {
+                    throw new InvalidOperationException(
+                        "External manual-game category membership is not present.");
+                }
+
+                detail = apply
+                    ? "External membership applied and verified."
+                    : "External membership remains present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var currentCategory =
+                PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+            var currentGame = PlayniteApi.Database.Games.Get(GameManual);
+            var currentMembership =
+                currentGame != null &&
+                currentGame.CategoryIds != null &&
+                currentGame.CategoryIds.Contains(EnrichmentCategoryBook);
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        manual_game_id = GameManual.ToString(),
+                        category_id = EnrichmentCategoryBook.ToString(),
+                        category_name = currentCategory == null
+                            ? string.Empty
+                            : currentCategory.Name,
+                        membership_present = currentMembership,
+                        detail = detail
+                    },
+                    true));
         }
 
         private static void EnsureFile(string path, string content)
