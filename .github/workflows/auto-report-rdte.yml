@@ -19,8 +19,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Materialize deterministic Playnite fixture
+        env:
+          RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RDTE_TRIGGER_SHA: ${{ github.sha }}
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP "auto-report-rdte"
