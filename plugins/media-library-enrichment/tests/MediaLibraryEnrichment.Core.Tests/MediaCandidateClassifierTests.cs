@@ -31,5 +31,17 @@ namespace MediaLibraryEnrichment.Core.Tests
         {
             Assert.Equal(expected, MediaCandidateClassifier.ClassifyKind(manualPath, notes));
         }
+
+        [Theory]
+        [InlineData(@"C:\runner-a\fixture\rdte-book.pdf", "rdte-book.pdf")]
+        [InlineData(@"D:\runner-b\other\rdte-book.pdf", "rdte-book.pdf")]
+        [InlineData("/tmp/runner-c/fixture/rdte-comic.cbz", "rdte-comic.cbz")]
+        [InlineData(null, "")]
+        public void NormalizesEphemeralRootsToStableEvidenceName(
+            string path,
+            string expected)
+        {
+            Assert.Equal(expected, MediaCandidateClassifier.NormalizeLocalEvidenceName(path));
+        }
     }
 }
