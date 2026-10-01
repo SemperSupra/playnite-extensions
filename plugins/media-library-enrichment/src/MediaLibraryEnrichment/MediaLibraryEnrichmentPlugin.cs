@@ -91,7 +91,8 @@ namespace MediaLibraryEnrichment
                     Name = game.Name ?? string.Empty,
                     Source = game.Source == null ? string.Empty : game.Source.Name ?? string.Empty,
                     Kind = MediaCandidateClassifier.ClassifyKind(game.Manual, game.Notes),
-                    ManualPath = game.Manual ?? string.Empty,
+                    LocalEvidenceName =
+                        MediaCandidateClassifier.NormalizeLocalEvidenceName(game.Manual),
                     CoverMissing = string.IsNullOrWhiteSpace(game.CoverImage)
                 })
                 .OrderBy(item => item.PlayniteId, StringComparer.Ordinal)
