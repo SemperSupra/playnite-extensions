@@ -69,12 +69,10 @@ function Wait-ForText {
         if ($Process -and $Process.HasExited) {
             throw "Playnite exited while waiting for '$Text'. Exit code: $($Process.ExitCode)"
         }
-
         if (Test-Path $Path) {
             $content = Get-Content $Path -Raw
             if ($content.Contains($Text)) { return }
         }
-
         Start-Sleep -Milliseconds 250
     }
 
@@ -141,6 +139,14 @@ function Read-PextManifest {
     }
 }
 
+function Set-ReconcileMode {
+    param([string]$Path, [ValidateSet("observe", "apply", "rollback")][string]$Mode)
+
+    [ordered]@{ Mode = $Mode } |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -Path $Path -Encoding UTF8
+}
+
 function Assert-ObservationReceipt {
     param([string]$Path)
 
@@ -148,11 +154,11 @@ function Assert-ObservationReceipt {
     if ($observation.Schema -ne "sempersupra-media-library-enrichment-observation/v1") {
         throw "Unexpected Media Library Enrichment observation schema."
     }
-    if ($observation.FixtureContract -ne "media-baseline-v1") {
-        throw "Observation receipt is not bound to media-baseline-v1."
+    if ($observation.FixtureContract -ne "media-raw-v1") {
+        throw "Observation receipt is not bound to media-raw-v1."
     }
     if ($observation.CandidateCount -ne 3 -or @($observation.Candidates).Count -ne 3) {
-        throw "Expected exactly three Humble missing-cover candidates."
+        throw "Expected exactly three raw Humble missing-cover candidates."
     }
 
     $expected = @{
@@ -183,12 +189,118 @@ function Assert-ObservationReceipt {
     return $observation
 }
 
+function Assert-FirstApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Schema -ne "sempersupra-media-library-enrichment-category-r4i/v1" -or
+        $value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 3 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0) {
+        throw "First R4I apply receipt does not prove exactly three clean mutations."
+    }
+
+    $applied = @($value.Operations | Where-Object Outcome -eq "APPLIED")
+    if ($applied.Count -ne 3) {
+        throw "Expected exactly three APPLIED category operations."
+    }
+
+    $expectedNames = @(
+        "SemperSupra.Media:Audio",
+        "SemperSupra.Media:Book",
+        "SemperSupra.Media:Comic"
+    )
+    $actualNames = @($applied | ForEach-Object CategoryName | Sort-Object)
+    if (@(Compare-Object $expectedNames $actualNames).Count -ne 0) {
+        throw "First apply did not materialize the expected owned categories."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 0 -or
+        $value.NoopCount -ne 3 -or
+        $value.ConflictCount -ne 0) {
+        throw "Second apply is not a clean three-item NOOP."
+    }
+
+    if (@($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 3) {
+        throw "Second apply did not report exactly three NOOP operations."
+    }
+
+    return $value
+}
+
+function Assert-Rollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 3 -or
+        $value.RollbackAppliedCount -ne 3 -or
+        $value.ConflictCount -ne 0) {
+        throw "Rollback receipt does not prove three clean owned-membership reversions."
+    }
+
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
+        throw "Rollback did not remove exactly three owned memberships."
+    }
+    if (@($value.Operations | Where-Object Outcome -eq "CATEGORY_REMOVED").Count -ne 3) {
+        throw "Rollback did not remove and verify exactly three plugin-created category objects."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 0 -or
+        $value.RollbackAppliedCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations).Count -ne 0) {
+        throw "Second rollback is not an empty NOOP state."
+    }
+
+    return $value
+}
+
+function Assert-RolledBackLedger {
+    param([string]$Path)
+
+    $ledger = Get-Content $Path -Raw | ConvertFrom-Json
+    $entries = @($ledger.Entries)
+    if ($entries.Count -ne 3) {
+        throw "Expected three ownership-ledger entries."
+    }
+    if (@($entries | Where-Object Status -ne "ROLLED_BACK").Count -ne 0) {
+        throw "Ownership ledger contains an entry that is not ROLLED_BACK."
+    }
+    if (@($entries | Where-Object CategoryCreated -ne $true).Count -ne 0) {
+        throw "Expected this raw-fixture rep to own creation of all three category objects."
+    }
+
+    return $ledger
+}
+
 $receipt = [ordered]@{
-    schema = "sempersupra-media-library-enrichment-rdte/v1"
+    schema = "sempersupra-media-library-enrichment-rdte/v2"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
+    product_authority_sha = $env:RDTE_PRODUCT_AUTHORITY_SHA
     trigger_sha = if ($env:RDTE_TRIGGER_SHA) { $env:RDTE_TRIGGER_SHA } else { $env:GITHUB_SHA }
     plugin_id = $pluginId
     plugin_name = $pluginName
+    fixture_profile = "media-raw-v1"
     phases = [ordered]@{
         unit_tests = "NOT_RUN"
         build = "NOT_RUN"
@@ -196,7 +308,10 @@ $receipt = [ordered]@{
         toolbox_pack = "NOT_RUN"
         native_install = "NOT_RUN"
         observation_oracle = "NOT_RUN"
-        restart_oracle = "NOT_RUN"
+        first_apply = "NOT_RUN"
+        idempotent_apply = "NOT_RUN"
+        rollback = "NOT_RUN"
+        idempotent_rollback = "NOT_RUN"
         native_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -291,6 +406,14 @@ try {
     Copy-Item $packagePath (Join-Path $EvidenceDir "MediaLibraryEnrichment-$($package.Version).pext") -Force
     $receipt.phases.toolbox_pack = "PASS"
 
+    $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
+    New-Item $pluginData -ItemType Directory -Force | Out-Null
+    $settingsPath = Join-Path $pluginData "settings.json"
+    $observationPath = Join-Path $pluginData "observation-receipt.json"
+    $r4iPath = Join-Path $pluginData "r4i-receipt.json"
+    $ledgerPath = Join-Path $pluginData "category-ledger.json"
+    Set-ReconcileMode -Path $settingsPath -Mode "apply"
+
     $queuePath = Join-Path $userData "extinstalls.json"
     $installQueue = @([ordered]@{ InstallType = 0; Path = $packagePath })
     ConvertTo-Json -InputObject $installQueue -Depth 4 |
@@ -307,42 +430,66 @@ try {
     if (Test-Path $queuePath) { throw "Playnite did not consume Media Library Enrichment install queue." }
 
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $($package.Version)" -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds
-
     $installedDir = Join-Path $userData "Extensions\$pluginId"
     if (-not (Test-Path (Join-Path $installedDir "extension.yaml"))) {
         throw "Media Library Enrichment was not materialized under its Playnite extension ID."
     }
     $receipt.phases.native_install = "PASS"
 
-    $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
-    $observationPath = Join-Path $pluginData "observation-receipt.json"
     Wait-ForFile -Path $observationPath -Process $playniteProcess -TimeoutSeconds 20
     $firstObservation = Assert-ObservationReceipt -Path $observationPath
-    $firstObservationHash = (Get-FileHash $observationPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $receipt.observation = [ordered]@{
         candidate_count = $firstObservation.CandidateCount
         names = @($firstObservation.Candidates | ForEach-Object Name | Sort-Object)
         kinds = @($firstObservation.Candidates | Sort-Object Name | ForEach-Object { "$($_.Name):$($_.Kind)" })
-        sha256 = $firstObservationHash
     }
     Copy-Item $observationPath (Join-Path $EvidenceDir "observation-first.json") -Force
     $receipt.phases.observation_oracle = "PASS"
 
+    Wait-ForFile -Path $r4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $firstApply = Assert-FirstApply -Path $r4iPath
+    $receipt.first_apply_plan_sha256 = $firstApply.PlanSha256
+    Copy-Item $r4iPath (Join-Path $EvidenceDir "r4i-first-apply.json") -Force
+    Copy-Item $ledgerPath (Join-Path $EvidenceDir "ledger-after-first-apply.json") -Force
+    $receipt.phases.first_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
-    Remove-Item $observationPath -Force
+    Remove-Item $r4iPath -Force
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $($package.Version)" -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds
-    Wait-ForFile -Path $observationPath -Process $playniteProcess -TimeoutSeconds 20
-    $secondObservation = Assert-ObservationReceipt -Path $observationPath
-    $secondObservationHash = (Get-FileHash $observationPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($secondObservationHash -ne $firstObservationHash) {
-        throw "Observation receipt changed across restart."
-    }
-    Copy-Item $observationPath (Join-Path $EvidenceDir "observation-second.json") -Force
-    $receipt.restart_observation_sha256 = $secondObservationHash
-    $receipt.phases.restart_oracle = "PASS"
+    Wait-ForFile -Path $r4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $secondApply = Assert-IdempotentApply -Path $r4iPath
+    $receipt.idempotent_apply_plan_sha256 = $secondApply.PlanSha256
+    Copy-Item $r4iPath (Join-Path $EvidenceDir "r4i-second-apply.json") -Force
+    $receipt.phases.idempotent_apply = "PASS"
+
+    Stop-Playnite -DesktopExe $desktopExe -UserData $userData
+    Set-ReconcileMode -Path $settingsPath -Mode "rollback"
+    Remove-Item $r4iPath -Force
+    if (Test-Path $logPath) { Remove-Item $logPath -Force }
+
+    $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $($package.Version)" -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds
+    Wait-ForFile -Path $r4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $rollback = Assert-Rollback -Path $r4iPath
+    $receipt.rollback_plan_sha256 = $rollback.PlanSha256
+    Assert-RolledBackLedger -Path $ledgerPath | Out-Null
+    Copy-Item $r4iPath (Join-Path $EvidenceDir "r4i-rollback.json") -Force
+    Copy-Item $ledgerPath (Join-Path $EvidenceDir "ledger-after-rollback.json") -Force
+    $receipt.phases.rollback = "PASS"
+
+    Stop-Playnite -DesktopExe $desktopExe -UserData $userData
+    Remove-Item $r4iPath -Force
+    if (Test-Path $logPath) { Remove-Item $logPath -Force }
+
+    $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $($package.Version)" -Process $playniteProcess -TimeoutSeconds $StartupTimeoutSeconds
+    Wait-ForFile -Path $r4iPath -Process $playniteProcess -TimeoutSeconds 20
+    Assert-IdempotentRollback -Path $r4iPath | Out-Null
+    Copy-Item $r4iPath (Join-Path $EvidenceDir "r4i-second-rollback.json") -Force
+    $receipt.phases.idempotent_rollback = "PASS"
 
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
 
@@ -363,8 +510,10 @@ try {
     Wait-ForAbsent -Path $installedDir -TimeoutSeconds 15
     $receipt.phases.native_uninstall = "PASS"
 
-    if (-not (Test-Path $observationPath)) {
-        throw "Media Library Enrichment observation data did not survive native plugin uninstall."
+    foreach ($persistentPath in @($settingsPath, $observationPath, $r4iPath, $ledgerPath)) {
+        if (-not (Test-Path $persistentPath -PathType Leaf)) {
+            throw "Persistent plugin data did not survive native uninstall: $persistentPath"
+        }
     }
     $receipt.phases.data_preservation = "PASS"
 
