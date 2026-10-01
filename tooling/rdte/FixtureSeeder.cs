@@ -65,6 +65,19 @@ namespace SemperSupraRdteSeeder
                 return;
             }
 
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-action-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-action-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunActionConflictFixture(dataPath, fixturePath, fixtureProfile);
+                return;
+            }
+
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
             var cbzPath = Path.Combine(fixturePath, "rdte-comic.cbz");
@@ -251,6 +264,120 @@ namespace SemperSupraRdteSeeder
                             ? string.Empty
                             : currentCategory.Name,
                         membership_present = currentMembership,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunActionConflictFixture(
+            string dataPath,
+            string fixturePath,
+            string fixtureProfile)
+        {
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-action-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var externalPath = Path.Combine(fixturePath, "external-book.pdf");
+            EnsureFile(
+                externalPath,
+                "%PDF-1.4\n% SemperSupra external action conflict fixture\n");
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Humble Ebook fixture is unavailable.");
+                }
+
+                var readActions = game.GameActions == null
+                    ? new List<GameAction>()
+                    : game.GameActions
+                        .Where(action =>
+                            !action.IsPlayAction &&
+                            string.Equals(
+                                action.Name,
+                                "Read",
+                                StringComparison.Ordinal))
+                        .ToList();
+
+                if (apply)
+                {
+                    if (readActions.Count != 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected exactly one plugin-projected custom Read action.");
+                    }
+
+                    readActions[0].Path = externalPath;
+                    readActions[0].WorkingDir = fixturePath;
+                    PlayniteApi.Database.Games.Update(game);
+                }
+
+                var verified = PlayniteApi.Database.Games.Get(GameBook);
+                var preserved = verified != null &&
+                    verified.GameActions != null &&
+                    verified.GameActions.Any(action =>
+                        !action.IsPlayAction &&
+                        string.Equals(action.Name, "Read", StringComparison.Ordinal) &&
+                        string.Equals(action.Path, externalPath, StringComparison.Ordinal));
+
+                if (!preserved)
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed custom Read action is not present.");
+                }
+
+                if (verified.Playtime != 0 ||
+                    verified.PlayCount != 0 ||
+                    verified.LastActivity.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        "Custom action projection changed gameplay activity semantics.");
+                }
+
+                detail = apply
+                    ? "External Read action mutation applied and verified."
+                    : "External Read action mutation remains present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var current = PlayniteApi.Database.Games.Get(GameBook);
+            var currentAction = current == null || current.GameActions == null
+                ? null
+                : current.GameActions.FirstOrDefault(action =>
+                    !action.IsPlayAction &&
+                    string.Equals(action.Name, "Read", StringComparison.Ordinal) &&
+                    string.Equals(action.Path, externalPath, StringComparison.Ordinal));
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "action-conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-action-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        action_name = currentAction == null
+                            ? string.Empty
+                            : currentAction.Name,
+                        action_path_name = currentAction == null
+                            ? string.Empty
+                            : Path.GetFileName(currentAction.Path),
+                        is_play_action = currentAction != null && currentAction.IsPlayAction,
+                        playtime = current == null ? 0UL : current.Playtime,
+                        play_count = current == null ? 0UL : current.PlayCount,
+                        last_activity = current == null ? null : current.LastActivity,
                         detail = detail
                     },
                     true));
