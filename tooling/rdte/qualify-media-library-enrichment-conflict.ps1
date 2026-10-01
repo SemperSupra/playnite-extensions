@@ -232,6 +232,72 @@ function Assert-ConflictRollback {
     return $value
 }
 
+
+function Assert-ActionReapply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Schema -ne "sempersupra-media-library-enrichment-action-r4i/v1" -or
+        $value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 3 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 3) {
+        throw "Action re-apply did not reproduce three clean custom actions."
+    }
+
+    if (@($value.Operations | Where-Object IsPlayAction -eq $true).Count -ne 0) {
+        throw "Action re-apply produced a primary play action."
+    }
+
+    return $value
+}
+
+function Assert-ActionConflictReceipt {
+    param([string]$Path, [ValidateSet("apply", "verify")][string]$ExpectedMode)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.schema -ne "sempersupra-playnite-r4i-action-conflict-fixture/v1" -or
+        $value.mode -ne $ExpectedMode -or
+        $value.result -ne "PASS" -or
+        $value.action_name -ne "Read" -or
+        $value.action_path_name -ne "external-book.pdf" -or
+        $value.is_play_action -ne $false -or
+        $value.playtime -ne 0 -or
+        $value.play_count -ne 0 -or
+        $null -ne $value.last_activity) {
+        throw "Action conflict fixture did not prove preserved custom-action semantics for '$ExpectedMode'."
+    }
+
+    return $value
+}
+
+function Assert-ActionConflictRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 3 -or
+        $value.RollbackAppliedCount -ne 2 -or
+        $value.ConflictCount -ne 1) {
+        throw "Action conflict rollback did not prove two owned removals plus one preserved external mutation."
+    }
+
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 2) {
+        throw "Action conflict rollback did not remove exactly two still-owned actions."
+    }
+
+    $preserved = @($value.Operations | Where-Object Outcome -eq "CONFLICT_ACTION_CHANGED")
+    if ($preserved.Count -ne 1 -or
+        $preserved[0].ActionName -ne "Read" -or
+        $preserved[0].Name -ne "RDTE Humble Ebook") {
+        throw "Action conflict rollback did not preserve the externally changed Ebook Read action."
+    }
+
+    return $value
+}
+
 function Native-InstallAndRun {
     param(
         [string]$PackagePath,
@@ -309,6 +375,10 @@ $receipt = [ordered]@{
         external_conflict_inject = "NOT_RUN"
         conflict_rollback = "NOT_RUN"
         external_conflict_verify = "NOT_RUN"
+        action_reapply = "NOT_RUN"
+        action_conflict_inject = "NOT_RUN"
+        action_conflict_rollback = "NOT_RUN"
+        action_conflict_verify = "NOT_RUN"
         product_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -422,11 +492,92 @@ try {
     Stop-Playnite
     Native-Uninstall -InstalledDir $seederVerify.InstalledDir
 
+    Set-ProductMode -Mode "apply"
+    $actionR4iPath = Join-Path $userData "ExtensionsData\$pluginId\action-r4i-receipt.json"
+    if (Test-Path $r4iPath) {
+        Remove-Item $r4iPath -Force
+    }
+    if (Test-Path $actionR4iPath) {
+        Remove-Item $actionR4iPath -Force
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $actionR4iPath -Process $productProcess
+    $actionReapply = Assert-ActionReapply -Path $actionR4iPath
+    $receipt.action_reapply_plan_sha256 = $actionReapply.PlanSha256
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-conflict-reapply.json") -Force
+    $receipt.phases.action_reapply = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
+    Set-ProductMode -Mode "observe"
+
+    Set-Content -Path $profilePath -Value "r4i-action-conflict-apply-v1" -Encoding UTF8
+    $actionConflictPath = Join-Path $seederData "action-conflict-receipt.json"
+    if (Test-Path $actionConflictPath) {
+        Remove-Item $actionConflictPath -Force
+    }
+
+    $actionSeederInstall = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $actionConflictPath
+    Assert-ActionConflictReceipt -Path $actionConflictPath -ExpectedMode "apply" | Out-Null
+    Copy-Item $actionConflictPath (Join-Path $EvidenceDir "external-action-conflict-applied.json") -Force
+    $receipt.phases.action_conflict_inject = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $actionSeederInstall.InstalledDir
+
+    Set-ProductMode -Mode "rollback"
+    if (Test-Path $r4iPath) {
+        Remove-Item $r4iPath -Force
+    }
+    if (Test-Path $actionR4iPath) {
+        Remove-Item $actionR4iPath -Force
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $actionR4iPath -Process $productProcess
+    $actionConflictRollback = Assert-ActionConflictRollback -Path $actionR4iPath
+    $receipt.action_conflict_rollback_plan_sha256 = $actionConflictRollback.PlanSha256
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-conflict-rollback.json") -Force
+    $receipt.phases.action_conflict_rollback = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
+    Set-ProductMode -Mode "observe"
+
+    Set-Content -Path $profilePath -Value "r4i-action-conflict-verify-v1" -Encoding UTF8
+    if (Test-Path $actionConflictPath) {
+        Remove-Item $actionConflictPath -Force
+    }
+
+    $actionSeederVerify = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $actionConflictPath
+    Assert-ActionConflictReceipt -Path $actionConflictPath -ExpectedMode "verify" | Out-Null
+    Copy-Item $actionConflictPath (Join-Path $EvidenceDir "external-action-conflict-verified.json") -Force
+    $receipt.phases.action_conflict_verify = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $actionSeederVerify.InstalledDir
+
     Native-Uninstall -InstalledDir $productInstalledDir
     $receipt.phases.product_uninstall = "PASS"
 
     $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
-    foreach ($name in @("settings.json", "observation-receipt.json", "r4i-receipt.json", "category-ledger.json")) {
+    foreach ($name in @(
+        "settings.json",
+        "observation-receipt.json",
+        "r4i-receipt.json",
+        "category-ledger.json",
+        "action-r4i-receipt.json",
+        "action-ledger.json"
+    )) {
         if (-not (Test-Path (Join-Path $pluginData $name) -PathType Leaf)) {
             throw "Persistent plugin data did not survive final native uninstall: $name"
         }
