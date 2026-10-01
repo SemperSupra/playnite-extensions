@@ -295,6 +295,101 @@ function Assert-RolledBackLedger {
     return $ledger
 }
 
+
+function Assert-FirstActionApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Schema -ne "sempersupra-media-library-enrichment-action-r4i/v1" -or
+        $value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 3 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0) {
+        throw "First action apply does not prove exactly three clean custom-action mutations."
+    }
+
+    $applied = @($value.Operations | Where-Object Outcome -eq "APPLIED")
+    if ($applied.Count -ne 3 -or @($applied | Where-Object IsPlayAction -eq $true).Count -ne 0) {
+        throw "Action apply must materialize exactly three non-play custom actions."
+    }
+
+    $expected = @(
+        "RDTE Humble Comic|Read|rdte-comic.cbz",
+        "RDTE Humble Ebook|Read|rdte-book.pdf",
+        "RDTE Humble Soundtrack|Listen|rdte-soundtrack.flac"
+    )
+    $actual = @(
+        $applied |
+            Sort-Object Name |
+            ForEach-Object { "$($_.Name)|$($_.ActionName)|$($_.LocalEvidenceName)" }
+    )
+    if (@(Compare-Object $expected $actual).Count -ne 0) {
+        throw "First action apply does not match the expected Read/Listen custom actions."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentActionApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 0 -or
+        $value.NoopCount -ne 3 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 3) {
+        throw "Second action apply is not a clean three-action NOOP."
+    }
+
+    return $value
+}
+
+function Assert-ActionRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 3 -or
+        $value.RollbackAppliedCount -ne 3 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
+        throw "Action rollback did not remove exactly three owned custom actions."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentActionRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 0 -or
+        $value.RollbackAppliedCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations).Count -ne 0) {
+        throw "Second action rollback is not an empty NOOP state."
+    }
+
+    return $value
+}
+
+function Assert-RolledBackActionLedger {
+    param([string]$Path)
+
+    $ledger = Get-Content $Path -Raw | ConvertFrom-Json
+    $entries = @($ledger.Entries)
+    if ($entries.Count -ne 3 -or
+        @($entries | Where-Object Status -ne "ROLLED_BACK").Count -ne 0) {
+        throw "Expected three ROLLED_BACK action-ledger entries."
+    }
+
+    return $ledger
+}
+
 $receipt = [ordered]@{
     schema = "sempersupra-media-library-enrichment-rdte/v2"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
@@ -311,9 +406,13 @@ $receipt = [ordered]@{
         native_install = "NOT_RUN"
         observation_oracle = "NOT_RUN"
         first_apply = "NOT_RUN"
+        first_action_apply = "NOT_RUN"
         idempotent_apply = "NOT_RUN"
+        idempotent_action_apply = "NOT_RUN"
         rollback = "NOT_RUN"
+        action_rollback = "NOT_RUN"
         idempotent_rollback = "NOT_RUN"
+        idempotent_action_rollback = "NOT_RUN"
         native_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -414,6 +513,8 @@ try {
     $observationPath = Join-Path $pluginData "observation-receipt.json"
     $r4iPath = Join-Path $pluginData "r4i-receipt.json"
     $ledgerPath = Join-Path $pluginData "category-ledger.json"
+    $actionR4iPath = Join-Path $pluginData "action-r4i-receipt.json"
+    $actionLedgerPath = Join-Path $pluginData "action-ledger.json"
     Set-ReconcileMode -Path $settingsPath -Mode "apply"
 
     $queuePath = Join-Path $userData "extinstalls.json"
@@ -455,8 +556,16 @@ try {
     Copy-Item $ledgerPath (Join-Path $EvidenceDir "ledger-after-first-apply.json") -Force
     $receipt.phases.first_apply = "PASS"
 
+    Wait-ForFile -Path $actionR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $firstActionApply = Assert-FirstActionApply -Path $actionR4iPath
+    $receipt.first_action_apply_plan_sha256 = $firstActionApply.PlanSha256
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-r4i-first-apply.json") -Force
+    Copy-Item $actionLedgerPath (Join-Path $EvidenceDir "action-ledger-after-first-apply.json") -Force
+    $receipt.phases.first_action_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Remove-Item $r4iPath -Force
+    if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -467,9 +576,16 @@ try {
     Copy-Item $r4iPath (Join-Path $EvidenceDir "r4i-second-apply.json") -Force
     $receipt.phases.idempotent_apply = "PASS"
 
+    Wait-ForFile -Path $actionR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $secondActionApply = Assert-IdempotentActionApply -Path $actionR4iPath
+    $receipt.idempotent_action_apply_plan_sha256 = $secondActionApply.PlanSha256
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-r4i-second-apply.json") -Force
+    $receipt.phases.idempotent_action_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Set-ReconcileMode -Path $settingsPath -Mode "rollback"
     Remove-Item $r4iPath -Force
+    if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -482,8 +598,17 @@ try {
     Copy-Item $ledgerPath (Join-Path $EvidenceDir "ledger-after-rollback.json") -Force
     $receipt.phases.rollback = "PASS"
 
+    Wait-ForFile -Path $actionR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $actionRollback = Assert-ActionRollback -Path $actionR4iPath
+    $receipt.action_rollback_plan_sha256 = $actionRollback.PlanSha256
+    Assert-RolledBackActionLedger -Path $actionLedgerPath | Out-Null
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-r4i-rollback.json") -Force
+    Copy-Item $actionLedgerPath (Join-Path $EvidenceDir "action-ledger-after-rollback.json") -Force
+    $receipt.phases.action_rollback = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Remove-Item $r4iPath -Force
+    if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -492,6 +617,11 @@ try {
     Assert-IdempotentRollback -Path $r4iPath | Out-Null
     Copy-Item $r4iPath (Join-Path $EvidenceDir "r4i-second-rollback.json") -Force
     $receipt.phases.idempotent_rollback = "PASS"
+
+    Wait-ForFile -Path $actionR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    Assert-IdempotentActionRollback -Path $actionR4iPath | Out-Null
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-r4i-second-rollback.json") -Force
+    $receipt.phases.idempotent_action_rollback = "PASS"
 
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
 
@@ -519,7 +649,14 @@ try {
     Wait-ForAbsent -Path $installedDir -TimeoutSeconds 15
     $receipt.phases.native_uninstall = "PASS"
 
-    foreach ($persistentPath in @($settingsPath, $observationPath, $r4iPath, $ledgerPath)) {
+    foreach ($persistentPath in @(
+        $settingsPath,
+        $observationPath,
+        $r4iPath,
+        $ledgerPath,
+        $actionR4iPath,
+        $actionLedgerPath
+    )) {
         if (-not (Test-Path $persistentPath -PathType Leaf)) {
             throw "Persistent plugin data did not survive native uninstall: $persistentPath"
         }
