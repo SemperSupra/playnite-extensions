@@ -43,5 +43,19 @@ namespace MediaLibraryEnrichment.Core.Tests
         {
             Assert.Equal(expected, MediaCandidateClassifier.NormalizeLocalEvidenceName(path));
         }
+        [Theory]
+        [InlineData(@"C:\\media\\book.pdf", null, @"C:\\media\\book.pdf")]
+        [InlineData(null, @"RDTE audio fixture: C:\\media\\track.flac", @"C:\\media\\track.flac")]
+        [InlineData(null, "nothing useful", "")]
+        public void ResolvesStableLocalEvidencePath(
+            string manualPath,
+            string notes,
+            string expected)
+        {
+            Assert.Equal(
+                expected,
+                MediaCandidateClassifier.ResolveLocalEvidencePath(manualPath, notes));
+        }
+
     }
 }
