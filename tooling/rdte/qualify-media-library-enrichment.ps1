@@ -390,6 +390,95 @@ function Assert-RolledBackActionLedger {
     return $ledger
 }
 
+function Assert-FirstFilterPresetApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 3 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0) {
+        throw "First filter-preset apply does not prove exactly three clean native shelf mutations."
+    }
+
+    $applied = @($value.Operations | Where-Object Outcome -eq "APPLIED")
+    if ($applied.Count -ne 3) {
+        throw "Expected exactly three APPLIED filter-preset operations."
+    }
+
+    $expected = @(
+        "SemperSupra Media: Audio",
+        "SemperSupra Media: Books",
+        "SemperSupra Media: Comics"
+    )
+    $actual = @($applied | ForEach-Object PresetName | Sort-Object)
+    if (@(Compare-Object $expected $actual).Count -ne 0) {
+        throw "First filter-preset apply did not materialize the expected media shelves."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentFilterPresetApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 0 -or
+        $value.NoopCount -ne 3 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 3) {
+        throw "Second filter-preset apply is not a clean three-preset NOOP."
+    }
+
+    return $value
+}
+
+function Assert-FilterPresetRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 3 -or
+        $value.RollbackAppliedCount -ne 3 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
+        throw "Filter-preset rollback did not remove exactly three owned native shelves."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentFilterPresetRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 0 -or
+        $value.RollbackAppliedCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations).Count -ne 0) {
+        throw "Second filter-preset rollback is not an empty NOOP state."
+    }
+
+    return $value
+}
+
+function Assert-RolledBackFilterPresetLedger {
+    param([string]$Path)
+
+    $ledger = Get-Content $Path -Raw | ConvertFrom-Json
+    $entries = @($ledger.Entries)
+    if ($entries.Count -ne 3 -or
+        @($entries | Where-Object Status -ne "ROLLED_BACK").Count -ne 0) {
+        throw "Expected three ROLLED_BACK filter-preset ledger entries."
+    }
+
+    return $ledger
+}
+
 $receipt = [ordered]@{
     schema = "sempersupra-media-library-enrichment-rdte/v2"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
@@ -407,12 +496,16 @@ $receipt = [ordered]@{
         observation_oracle = "NOT_RUN"
         first_apply = "NOT_RUN"
         first_action_apply = "NOT_RUN"
+        first_filter_preset_apply = "NOT_RUN"
         idempotent_apply = "NOT_RUN"
         idempotent_action_apply = "NOT_RUN"
+        idempotent_filter_preset_apply = "NOT_RUN"
         rollback = "NOT_RUN"
         action_rollback = "NOT_RUN"
+        filter_preset_rollback = "NOT_RUN"
         idempotent_rollback = "NOT_RUN"
         idempotent_action_rollback = "NOT_RUN"
+        idempotent_filter_preset_rollback = "NOT_RUN"
         native_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -515,6 +608,8 @@ try {
     $ledgerPath = Join-Path $pluginData "category-ledger.json"
     $actionR4iPath = Join-Path $pluginData "action-r4i-receipt.json"
     $actionLedgerPath = Join-Path $pluginData "action-ledger.json"
+    $filterPresetR4iPath = Join-Path $pluginData "filter-preset-r4i-receipt.json"
+    $filterPresetLedgerPath = Join-Path $pluginData "filter-preset-ledger.json"
     Set-ReconcileMode -Path $settingsPath -Mode "apply"
 
     $queuePath = Join-Path $userData "extinstalls.json"
@@ -563,9 +658,17 @@ try {
     Copy-Item $actionLedgerPath (Join-Path $EvidenceDir "action-ledger-after-first-apply.json") -Force
     $receipt.phases.first_action_apply = "PASS"
 
+    Wait-ForFile -Path $filterPresetR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $firstFilterPresetApply = Assert-FirstFilterPresetApply -Path $filterPresetR4iPath
+    $receipt.first_filter_preset_apply_plan_sha256 = $firstFilterPresetApply.PlanSha256
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-r4i-first-apply.json") -Force
+    Copy-Item $filterPresetLedgerPath (Join-Path $EvidenceDir "filter-preset-ledger-after-first-apply.json") -Force
+    $receipt.phases.first_filter_preset_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Remove-Item $r4iPath -Force
     if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
+    if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -582,10 +685,17 @@ try {
     Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-r4i-second-apply.json") -Force
     $receipt.phases.idempotent_action_apply = "PASS"
 
+    Wait-ForFile -Path $filterPresetR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $secondFilterPresetApply = Assert-IdempotentFilterPresetApply -Path $filterPresetR4iPath
+    $receipt.idempotent_filter_preset_apply_plan_sha256 = $secondFilterPresetApply.PlanSha256
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-r4i-second-apply.json") -Force
+    $receipt.phases.idempotent_filter_preset_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Set-ReconcileMode -Path $settingsPath -Mode "rollback"
     Remove-Item $r4iPath -Force
     if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
+    if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -606,9 +716,18 @@ try {
     Copy-Item $actionLedgerPath (Join-Path $EvidenceDir "action-ledger-after-rollback.json") -Force
     $receipt.phases.action_rollback = "PASS"
 
+    Wait-ForFile -Path $filterPresetR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $filterPresetRollback = Assert-FilterPresetRollback -Path $filterPresetR4iPath
+    $receipt.filter_preset_rollback_plan_sha256 = $filterPresetRollback.PlanSha256
+    Assert-RolledBackFilterPresetLedger -Path $filterPresetLedgerPath | Out-Null
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-r4i-rollback.json") -Force
+    Copy-Item $filterPresetLedgerPath (Join-Path $EvidenceDir "filter-preset-ledger-after-rollback.json") -Force
+    $receipt.phases.filter_preset_rollback = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Remove-Item $r4iPath -Force
     if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
+    if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -622,6 +741,12 @@ try {
     Assert-IdempotentActionRollback -Path $actionR4iPath | Out-Null
     Copy-Item $actionR4iPath (Join-Path $EvidenceDir "action-r4i-second-rollback.json") -Force
     $receipt.phases.idempotent_action_rollback = "PASS"
+
+    Wait-ForFile -Path $filterPresetR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $secondFilterPresetRollback = Assert-IdempotentFilterPresetRollback -Path $filterPresetR4iPath
+    $receipt.idempotent_filter_preset_rollback_plan_sha256 = $secondFilterPresetRollback.PlanSha256
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-r4i-second-rollback.json") -Force
+    $receipt.phases.idempotent_filter_preset_rollback = "PASS"
 
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
 
@@ -655,7 +780,9 @@ try {
         $r4iPath,
         $ledgerPath,
         $actionR4iPath,
-        $actionLedgerPath
+        $actionLedgerPath,
+        $filterPresetR4iPath,
+        $filterPresetLedgerPath
     )) {
         if (-not (Test-Path $persistentPath -PathType Leaf)) {
             throw "Persistent plugin data did not survive native uninstall: $persistentPath"

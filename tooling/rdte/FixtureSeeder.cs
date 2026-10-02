@@ -24,6 +24,10 @@ namespace SemperSupraRdteSeeder
         private static readonly Guid EnrichmentCategoryBook =
             Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1401");
         private const string EnrichmentCategoryBookName = "SemperSupra.Media:Book";
+        private static readonly Guid EnrichmentFilterPresetBooks =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501");
+        private const string EnrichmentFilterPresetBooksName = "SemperSupra Media: Books";
+        private const string ExternalFilterPresetBooksName = "External Books Shelf";
 
         private static readonly Guid GameBook = Guid.Parse("73000000-0000-4000-8000-000000000001");
         private static readonly Guid GameComic = Guid.Parse("73000000-0000-4000-8000-000000000002");
@@ -75,6 +79,19 @@ namespace SemperSupraRdteSeeder
                     StringComparison.OrdinalIgnoreCase))
             {
                 RunActionConflictFixture(dataPath, fixturePath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-filter-preset-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-filter-preset-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunFilterPresetConflictFixture(dataPath, fixtureProfile);
                 return;
             }
 
@@ -383,6 +400,125 @@ namespace SemperSupraRdteSeeder
                             current != null && current.LastActivity.HasValue
                                 ? current.LastActivity.Value.ToString("o")
                                 : string.Empty,
+                        detail = detail
+                    },
+                    true));
+        }
+
+
+        private void RunFilterPresetConflictFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-filter-preset-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                var preset =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+                if (preset == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected plugin-owned Books filter preset is unavailable.");
+                }
+
+                if (apply)
+                {
+                    if (!string.Equals(
+                            preset.Name,
+                            EnrichmentFilterPresetBooksName,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Books filter preset is not in plugin-owned state before external mutation.");
+                    }
+
+                    preset.Name = ExternalFilterPresetBooksName;
+                    PlayniteApi.Database.FilterPresets.Update(preset);
+                }
+
+                var verified =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+                var categoryIds =
+                    verified == null ||
+                    verified.Settings == null ||
+                    verified.Settings.Category == null
+                        ? null
+                        : verified.Settings.Category.Ids;
+
+                var preserved =
+                    verified != null &&
+                    string.Equals(
+                        verified.Name,
+                        ExternalFilterPresetBooksName,
+                        StringComparison.Ordinal) &&
+                    categoryIds != null &&
+                    categoryIds.Count == 1 &&
+                    categoryIds[0] == EnrichmentCategoryBook;
+
+                if (!preserved)
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed Books filter preset is not present.");
+                }
+
+                var category =
+                    PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+                if (category == null ||
+                    !string.Equals(
+                        category.Name,
+                        EnrichmentCategoryBookName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Books category referenced by external filter preset is unavailable.");
+                }
+
+                detail = apply
+                    ? "External Books filter-preset mutation applied and verified."
+                    : "External Books filter-preset mutation and referenced category remain present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var current =
+                PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+            var currentCategory =
+                PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+            var currentCategoryIds =
+                current == null ||
+                current.Settings == null ||
+                current.Settings.Category == null
+                    ? null
+                    : current.Settings.Category.Ids;
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "filter-preset-conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-filter-preset-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        preset_id = EnrichmentFilterPresetBooks.ToString(),
+                        preset_name = current == null
+                            ? string.Empty
+                            : current.Name,
+                        category_id = EnrichmentCategoryBook.ToString(),
+                        category_reference_present =
+                            currentCategoryIds != null &&
+                            currentCategoryIds.Count == 1 &&
+                            currentCategoryIds[0] == EnrichmentCategoryBook,
+                        category_present = currentCategory != null,
                         detail = detail
                     },
                     true));

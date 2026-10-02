@@ -13,7 +13,7 @@ using System.Text;
 
 namespace MediaLibraryEnrichment
 {
-    public sealed class MediaLibraryEnrichmentPlugin : GenericPlugin
+    public sealed partial class MediaLibraryEnrichmentPlugin : GenericPlugin
     {
         public static readonly Guid PluginGuid =
             Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377");
@@ -48,65 +48,80 @@ namespace MediaLibraryEnrichment
                     true));
 
             var settingsPath = Path.Combine(dataPath, "settings.json");
-            var ledgerPath = Path.Combine(dataPath, "category-ledger.json");
-            var reconcilePath = Path.Combine(dataPath, "r4i-receipt.json");
+            var categoryLedgerPath = Path.Combine(dataPath, "category-ledger.json");
+            var categoryReconcilePath = Path.Combine(dataPath, "r4i-receipt.json");
             var actionLedgerPath = Path.Combine(dataPath, "action-ledger.json");
             var actionReconcilePath = Path.Combine(dataPath, "action-r4i-receipt.json");
+            var filterPresetLedgerPath = Path.Combine(dataPath, "filter-preset-ledger.json");
+            var filterPresetReconcilePath = Path.Combine(dataPath, "filter-preset-r4i-receipt.json");
 
             var settings = MediaLibraryEnrichmentSettings.LoadOrCreate(settingsPath);
-            var ledger = CategoryLedger.LoadOrCreate(ledgerPath);
+            var categoryLedger = CategoryLedger.LoadOrCreate(categoryLedgerPath);
             var actionLedger = ActionLedger.LoadOrCreate(actionLedgerPath);
+            var filterPresetLedger = FilterPresetLedger.LoadOrCreate(filterPresetLedgerPath);
 
-            CategoryReconcileReceipt receipt;
-            if (string.Equals(settings.Mode, "apply", StringComparison.Ordinal))
+            CategoryReconcileReceipt categoryReceipt;
+            ActionReconcileReceipt actionReceipt;
+            FilterPresetReconcileReceipt filterPresetReceipt;
+
+            if (string.Equals(settings.Mode, "rollback", StringComparison.Ordinal))
             {
-                receipt = ApplyCategoryEnrichment(candidates, ledger, ledgerPath);
+                filterPresetReceipt = RollbackFilterPresetEnrichment(
+                    filterPresetLedger,
+                    filterPresetLedgerPath);
+                actionReceipt = RollbackActionEnrichment(
+                    actionLedger,
+                    actionLedgerPath);
+                categoryReceipt = RollbackCategoryEnrichment(
+                    categoryLedger,
+                    categoryLedgerPath);
             }
-            else if (string.Equals(settings.Mode, "rollback", StringComparison.Ordinal))
+            else if (string.Equals(settings.Mode, "apply", StringComparison.Ordinal))
             {
-                receipt = RollbackCategoryEnrichment(ledger, ledgerPath);
+                categoryReceipt = ApplyCategoryEnrichment(
+                    candidates,
+                    categoryLedger,
+                    categoryLedgerPath);
+                actionReceipt = ApplyActionEnrichment(
+                    candidates,
+                    actionLedger,
+                    actionLedgerPath);
+                filterPresetReceipt = ApplyFilterPresetEnrichment(
+                    filterPresetLedger,
+                    filterPresetLedgerPath);
             }
             else
             {
-                receipt = new CategoryReconcileReceipt
+                categoryReceipt = new CategoryReconcileReceipt
                 {
                     Mode = "observe",
                     CandidateCount = candidates.Length,
                     PlanSha256 = HashPlan(new CategoryOperationReceipt[0])
                 };
-            }
-
-            File.WriteAllText(
-                reconcilePath,
-                Serialization.ToJson(receipt, true));
-
-            ActionReconcileReceipt actionReceipt;
-            if (string.Equals(settings.Mode, "apply", StringComparison.Ordinal))
-            {
-                actionReceipt = ApplyActionEnrichment(
-                    candidates,
-                    actionLedger,
-                    actionLedgerPath);
-            }
-            else if (string.Equals(settings.Mode, "rollback", StringComparison.Ordinal))
-            {
-                actionReceipt = RollbackActionEnrichment(
-                    actionLedger,
-                    actionLedgerPath);
-            }
-            else
-            {
                 actionReceipt = new ActionReconcileReceipt
                 {
                     Mode = "observe",
                     CandidateCount = candidates.Length,
                     PlanSha256 = HashActionPlan(new ActionOperationReceipt[0])
                 };
+                filterPresetReceipt = new FilterPresetReconcileReceipt
+                {
+                    Mode = "observe",
+                    CandidateCount = FilterPresetEnrichmentPolicy.All().Length,
+                    PlanSha256 = HashFilterPresetPlan(
+                        new FilterPresetOperationReceipt[0])
+                };
             }
 
             File.WriteAllText(
+                categoryReconcilePath,
+                Serialization.ToJson(categoryReceipt, true));
+            File.WriteAllText(
                 actionReconcilePath,
                 Serialization.ToJson(actionReceipt, true));
+            File.WriteAllText(
+                filterPresetReconcilePath,
+                Serialization.ToJson(filterPresetReceipt, true));
         }
 
         private MediaObservation[] CaptureCandidates()
@@ -466,11 +481,17 @@ namespace MediaLibraryEnrichment
                     continue;
                 }
 
-                var inUse = PlayniteApi.Database.Games.Any(game =>
+                var inUseByGame = PlayniteApi.Database.Games.Any(game =>
                     game.CategoryIds != null &&
                     game.CategoryIds.Contains(categoryId));
 
-                if (inUse)
+                var inUseByFilterPreset = PlayniteApi.Database.FilterPresets.Any(preset =>
+                    preset.Settings != null &&
+                    preset.Settings.Category != null &&
+                    preset.Settings.Category.Ids != null &&
+                    preset.Settings.Category.Ids.Contains(categoryId));
+
+                if (inUseByGame || inUseByFilterPreset)
                 {
                     receipt.ConflictCount++;
                     receipt.Operations.Add(
@@ -479,7 +500,7 @@ namespace MediaLibraryEnrichment
                             CategoryId = entry.CategoryId,
                             CategoryName = entry.CategoryName,
                             Outcome = "CONFLICT_CATEGORY_IN_USE",
-                            Detail = "Category is referenced by other state; object retained."
+                            Detail = "Category is referenced by native game or filter-preset state; object retained."
                         });
                     continue;
                 }

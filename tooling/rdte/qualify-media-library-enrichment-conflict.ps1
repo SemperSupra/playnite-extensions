@@ -300,6 +300,66 @@ function Assert-ActionConflictRollback {
     return $value
 }
 
+function Assert-FilterPresetReapply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Schema -ne "sempersupra-media-library-enrichment-filter-preset-r4i/v1" -or
+        $value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 3 -or
+        $value.AppliedCount -ne 3 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 3) {
+        throw "Filter-preset re-apply did not reproduce three clean native shelves."
+    }
+
+    return $value
+}
+
+function Assert-FilterPresetConflictReceipt {
+    param([string]$Path, [ValidateSet("apply", "verify")][string]$ExpectedMode)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.schema -ne "sempersupra-playnite-r4i-filter-preset-conflict-fixture/v1" -or
+        $value.mode -ne $ExpectedMode -or
+        $value.result -ne "PASS" -or
+        $value.preset_id -ne "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501" -or
+        $value.preset_name -ne "External Books Shelf" -or
+        $value.category_id -ne "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1401" -or
+        $value.category_reference_present -ne $true -or
+        $value.category_present -ne $true) {
+        throw "Filter-preset conflict fixture did not prove preserved external Books shelf state for '$ExpectedMode'."
+    }
+
+    return $value
+}
+
+function Assert-FilterPresetConflictRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 3 -or
+        $value.RollbackAppliedCount -ne 2 -or
+        $value.ConflictCount -ne 1) {
+        throw "Filter-preset conflict rollback did not prove two owned removals plus one preserved external mutation."
+    }
+
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 2) {
+        throw "Filter-preset conflict rollback did not remove exactly two still-owned shelves."
+    }
+
+    $preserved = @($value.Operations | Where-Object Outcome -eq "CONFLICT_PRESET_CHANGED")
+    if ($preserved.Count -ne 1 -or
+        $preserved[0].PresetId -ne "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501" -or
+        $preserved[0].PresetName -ne "SemperSupra Media: Books") {
+        throw "Filter-preset conflict rollback did not preserve the externally changed Books shelf."
+    }
+
+    return $value
+}
+
 function Native-InstallAndRun {
     param(
         [string]$PackagePath,
@@ -381,6 +441,10 @@ $receipt = [ordered]@{
         action_conflict_inject = "NOT_RUN"
         action_conflict_rollback = "NOT_RUN"
         action_conflict_verify = "NOT_RUN"
+        filter_preset_reapply = "NOT_RUN"
+        filter_preset_conflict_inject = "NOT_RUN"
+        filter_preset_conflict_rollback = "NOT_RUN"
+        filter_preset_conflict_verify = "NOT_RUN"
         product_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -568,6 +632,88 @@ try {
     Stop-Playnite
     Native-Uninstall -InstalledDir $actionSeederVerify.InstalledDir
 
+    Set-ProductMode -Mode "apply"
+    $filterPresetR4iPath = Join-Path $userData "ExtensionsData\$pluginId\filter-preset-r4i-receipt.json"
+    if (Test-Path $r4iPath) {
+        Remove-Item $r4iPath -Force
+    }
+    if (Test-Path $actionR4iPath) {
+        Remove-Item $actionR4iPath -Force
+    }
+    if (Test-Path $filterPresetR4iPath) {
+        Remove-Item $filterPresetR4iPath -Force
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $filterPresetR4iPath -Process $productProcess
+    $filterPresetReapply = Assert-FilterPresetReapply -Path $filterPresetR4iPath
+    $receipt.filter_preset_reapply_plan_sha256 = $filterPresetReapply.PlanSha256
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-conflict-reapply.json") -Force
+    $receipt.phases.filter_preset_reapply = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
+    Set-ProductMode -Mode "observe"
+
+    Set-Content -Path $profilePath -Value "r4i-filter-preset-conflict-apply-v1" -Encoding UTF8
+    $filterPresetConflictPath = Join-Path $seederData "filter-preset-conflict-receipt.json"
+    if (Test-Path $filterPresetConflictPath) {
+        Remove-Item $filterPresetConflictPath -Force
+    }
+
+    $filterPresetSeederInstall = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $filterPresetConflictPath
+    Assert-FilterPresetConflictReceipt -Path $filterPresetConflictPath -ExpectedMode "apply" | Out-Null
+    Copy-Item $filterPresetConflictPath (Join-Path $EvidenceDir "external-filter-preset-conflict-applied.json") -Force
+    $receipt.phases.filter_preset_conflict_inject = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $filterPresetSeederInstall.InstalledDir
+
+    Set-ProductMode -Mode "rollback"
+    foreach ($path in @($r4iPath, $actionR4iPath, $filterPresetR4iPath)) {
+        if (Test-Path $path) {
+            Remove-Item $path -Force
+        }
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $filterPresetR4iPath -Process $productProcess
+    Wait-ForFile -Path $r4iPath -Process $productProcess
+
+    $filterPresetConflictRollback = Assert-FilterPresetConflictRollback -Path $filterPresetR4iPath
+    $receipt.filter_preset_conflict_rollback_plan_sha256 = $filterPresetConflictRollback.PlanSha256
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-conflict-rollback.json") -Force
+
+    $filterPresetCategoryRollback = Assert-ConflictRollback -Path $r4iPath
+    $receipt.filter_preset_category_conflict_rollback_plan_sha256 = $filterPresetCategoryRollback.PlanSha256
+    Copy-Item $r4iPath (Join-Path $EvidenceDir "filter-preset-category-conflict-rollback.json") -Force
+    $receipt.phases.filter_preset_conflict_rollback = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
+    Set-ProductMode -Mode "observe"
+
+    Set-Content -Path $profilePath -Value "r4i-filter-preset-conflict-verify-v1" -Encoding UTF8
+    if (Test-Path $filterPresetConflictPath) {
+        Remove-Item $filterPresetConflictPath -Force
+    }
+
+    $filterPresetSeederVerify = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $filterPresetConflictPath
+    Assert-FilterPresetConflictReceipt -Path $filterPresetConflictPath -ExpectedMode "verify" | Out-Null
+    Copy-Item $filterPresetConflictPath (Join-Path $EvidenceDir "external-filter-preset-conflict-verified.json") -Force
+    $receipt.phases.filter_preset_conflict_verify = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $filterPresetSeederVerify.InstalledDir
+
     Native-Uninstall -InstalledDir $productInstalledDir
     $receipt.phases.product_uninstall = "PASS"
 
@@ -578,7 +724,9 @@ try {
         "r4i-receipt.json",
         "category-ledger.json",
         "action-r4i-receipt.json",
-        "action-ledger.json"
+        "action-ledger.json",
+        "filter-preset-r4i-receipt.json",
+        "filter-preset-ledger.json"
     )) {
         if (-not (Test-Path (Join-Path $pluginData $name) -PathType Leaf)) {
             throw "Persistent plugin data did not survive final native uninstall: $name"
