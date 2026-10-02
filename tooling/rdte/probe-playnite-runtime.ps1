@@ -10,6 +10,9 @@ param(
 
     [switch]$ExerciseFixtureSeeder,
 
+    [ValidateSet("media-baseline-v1", "media-raw-v1")]
+    [string]$FixtureProfile = "media-baseline-v1",
+
     [int]$StartupTimeoutSeconds = 45
 )
 
@@ -544,7 +547,11 @@ try {
             throw "Missing positive fixture-seeder plugin-load oracle."
         }
 
-        $seedReceiptPath = Join-Path $userData "ExtensionsData\6d06cf1b-d1e4-4caa-b6c3-cc6026953135\seed-receipt.json"
+        $seederDataPath = Join-Path $userData "ExtensionsData\6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
+        New-Item $seederDataPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $seederDataPath "fixture-profile.txt") -Value $FixtureProfile -Encoding ASCII
+
+        $seedReceiptPath = Join-Path $seederDataPath "seed-receipt.json"
         $deadline = [DateTime]::UtcNow.AddSeconds(15)
         while (-not (Test-Path $seedReceiptPath) -and [DateTime]::UtcNow -lt $deadline) {
             if ($playniteProcess.HasExited) {

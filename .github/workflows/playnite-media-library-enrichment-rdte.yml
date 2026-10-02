@@ -1,0 +1,64 @@
+name: Media Library Enrichment Native RDTE
+
+on:
+  pull_request:
+    paths:
+      - "plugins/media-library-enrichment/**"
+      - ".github/workflows/playnite-media-library-enrichment-rdte.yml"
+      - "tooling/rdte/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Materialize deterministic Playnite fixture
+        env:
+          RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RDTE_TRIGGER_SHA: ${{ github.sha }}
+          RDTE_PRODUCT_AUTHORITY_SHA: cc70702ed8b8ab6a13867149493344d7351313b1
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "media-library-enrichment-rdte"
+          $runtimeEvidence = Join-Path $evidence "runtime"
+          ./tooling/rdte/probe-playnite-runtime.ps1 `
+            -ManifestPath ./tooling/rdte/playnite-10.62.json `
+            -EvidenceDir $runtimeEvidence `
+            -ExerciseFixtureSeeder `
+            -FixtureProfile media-raw-v1
+
+          $workRoots = @(
+            Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
+              Sort-Object LastWriteTimeUtc -Descending
+          )
+          if ($workRoots.Count -lt 1) {
+            throw "Unable to locate the disposable Playnite work root."
+          }
+
+          $workRoot = $workRoots[0].FullName
+          ./tooling/rdte/qualify-media-library-enrichment.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir (Join-Path $evidence "media-library-enrichment") `
+            -KeepInstalledForConflict
+
+          ./tooling/rdte/qualify-media-library-enrichment-conflict.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir (Join-Path $evidence "media-library-enrichment")
+
+      - name: Upload Media Library Enrichment RDTE evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: media-library-enrichment-rdte-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/media-library-enrichment-rdte
+          if-no-files-found: error
+          retention-days: 7
