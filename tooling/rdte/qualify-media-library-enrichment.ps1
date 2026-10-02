@@ -479,6 +479,95 @@ function Assert-RolledBackFilterPresetLedger {
     return $ledger
 }
 
+function Assert-FirstCoverApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 2 -or
+        $value.AppliedCount -ne 2 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 2) {
+        throw "First cover apply does not prove exactly two clean native CoverImage mutations."
+    }
+
+    $expected = @(
+        "73000000-0000-4000-8000-000000000001|rdte-book-cover-v1|rdte-book-cover.png",
+        "73000000-0000-4000-8000-000000000002|rdte-comic-cover-v1|rdte-comic-cover.png"
+    )
+    $actual = @(
+        $value.Operations |
+            Where-Object Outcome -eq "APPLIED" |
+            Sort-Object PlayniteId |
+            ForEach-Object { "$($_.PlayniteId)|$($_.EvidenceKey)|$($_.LocalEvidenceName)" }
+    )
+    if (@(Compare-Object $expected $actual).Count -ne 0) {
+        throw "First cover apply does not match the normalized ebook/comic evidence set."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentCoverApply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 2 -or
+        $value.AppliedCount -ne 0 -or
+        $value.NoopCount -ne 2 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 2) {
+        throw "Second cover apply is not a clean two-cover NOOP."
+    }
+
+    return $value
+}
+
+function Assert-CoverRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 2 -or
+        $value.RollbackAppliedCount -ne 2 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 2) {
+        throw "Cover rollback did not remove exactly two owned CoverImage projections."
+    }
+
+    return $value
+}
+
+function Assert-IdempotentCoverRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 0 -or
+        $value.RollbackAppliedCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations).Count -ne 0) {
+        throw "Second cover rollback is not an empty NOOP state."
+    }
+
+    return $value
+}
+
+function Assert-RolledBackCoverLedger {
+    param([string]$Path)
+
+    $ledger = Get-Content $Path -Raw | ConvertFrom-Json
+    $entries = @($ledger.Entries)
+    if ($entries.Count -ne 2 -or
+        @($entries | Where-Object Status -ne "ROLLED_BACK").Count -ne 0) {
+        throw "Expected two ROLLED_BACK cover-ledger entries."
+    }
+
+    return $ledger
+}
+
 $receipt = [ordered]@{
     schema = "sempersupra-media-library-enrichment-rdte/v2"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
@@ -497,15 +586,19 @@ $receipt = [ordered]@{
         first_apply = "NOT_RUN"
         first_action_apply = "NOT_RUN"
         first_filter_preset_apply = "NOT_RUN"
+        first_cover_apply = "NOT_RUN"
         idempotent_apply = "NOT_RUN"
         idempotent_action_apply = "NOT_RUN"
         idempotent_filter_preset_apply = "NOT_RUN"
+        idempotent_cover_apply = "NOT_RUN"
         rollback = "NOT_RUN"
         action_rollback = "NOT_RUN"
         filter_preset_rollback = "NOT_RUN"
+        cover_rollback = "NOT_RUN"
         idempotent_rollback = "NOT_RUN"
         idempotent_action_rollback = "NOT_RUN"
         idempotent_filter_preset_rollback = "NOT_RUN"
+        idempotent_cover_rollback = "NOT_RUN"
         native_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -610,6 +703,43 @@ try {
     $actionLedgerPath = Join-Path $pluginData "action-ledger.json"
     $filterPresetR4iPath = Join-Path $pluginData "filter-preset-r4i-receipt.json"
     $filterPresetLedgerPath = Join-Path $pluginData "filter-preset-ledger.json"
+    $coverEvidencePath = Join-Path $pluginData "cover-evidence.json"
+    $coverR4iPath = Join-Path $pluginData "cover-r4i-receipt.json"
+    $coverLedgerPath = Join-Path $pluginData "cover-ledger.json"
+
+    $seederMediaPath = Join-Path $userData "ExtensionsData\6d06cf1b-d1e4-4caa-b6c3-cc6026953135\media"
+    $bookCoverPath = Join-Path $seederMediaPath "rdte-book-cover.png"
+    $comicCoverPath = Join-Path $seederMediaPath "rdte-comic-cover.png"
+
+    $bookCoverSha = (Get-FileHash $bookCoverPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $comicCoverSha = (Get-FileHash $comicCoverPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($bookCoverSha -ne "ca3845dd963d15fe3131cbaf9a2de3f525726457f9eae923eaa749d842078660" -or
+        $comicCoverSha -ne "03e7a770b4891ee4e1b35e880f6700238830dcc99eb8e0f6c7a0d5a1fb2d362d") {
+        throw "Deterministic local cover evidence does not match the pinned content hashes."
+    }
+
+    $coverEvidence = [ordered]@{
+        Schema = "sempersupra-media-library-enrichment-cover-evidence/v1"
+        Items = @(
+            [ordered]@{
+                PlayniteId = "73000000-0000-4000-8000-000000000001"
+                EvidenceKey = "rdte-book-cover-v1"
+                LocalPath = $bookCoverPath
+                ContentSha256 = $bookCoverSha
+                SourceKind = "rdte-local"
+            },
+            [ordered]@{
+                PlayniteId = "73000000-0000-4000-8000-000000000002"
+                EvidenceKey = "rdte-comic-cover-v1"
+                LocalPath = $comicCoverPath
+                ContentSha256 = $comicCoverSha
+                SourceKind = "rdte-local"
+            }
+        )
+    }
+    ConvertTo-Json -InputObject $coverEvidence -Depth 6 |
+        Set-Content -Path $coverEvidencePath -Encoding UTF8
+
     Set-ReconcileMode -Path $settingsPath -Mode "apply"
 
     $queuePath = Join-Path $userData "extinstalls.json"
@@ -665,10 +795,18 @@ try {
     Copy-Item $filterPresetLedgerPath (Join-Path $EvidenceDir "filter-preset-ledger-after-first-apply.json") -Force
     $receipt.phases.first_filter_preset_apply = "PASS"
 
+    Wait-ForFile -Path $coverR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $firstCoverApply = Assert-FirstCoverApply -Path $coverR4iPath
+    $receipt.first_cover_apply_plan_sha256 = $firstCoverApply.PlanSha256
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "cover-r4i-first-apply.json") -Force
+    Copy-Item $coverLedgerPath (Join-Path $EvidenceDir "cover-ledger-after-first-apply.json") -Force
+    $receipt.phases.first_cover_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Remove-Item $r4iPath -Force
     if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
     if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
+    if (Test-Path $coverR4iPath) { Remove-Item $coverR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -691,11 +829,18 @@ try {
     Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-r4i-second-apply.json") -Force
     $receipt.phases.idempotent_filter_preset_apply = "PASS"
 
+    Wait-ForFile -Path $coverR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $secondCoverApply = Assert-IdempotentCoverApply -Path $coverR4iPath
+    $receipt.idempotent_cover_apply_plan_sha256 = $secondCoverApply.PlanSha256
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "cover-r4i-second-apply.json") -Force
+    $receipt.phases.idempotent_cover_apply = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Set-ReconcileMode -Path $settingsPath -Mode "rollback"
     Remove-Item $r4iPath -Force
     if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
     if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
+    if (Test-Path $coverR4iPath) { Remove-Item $coverR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -724,10 +869,19 @@ try {
     Copy-Item $filterPresetLedgerPath (Join-Path $EvidenceDir "filter-preset-ledger-after-rollback.json") -Force
     $receipt.phases.filter_preset_rollback = "PASS"
 
+    Wait-ForFile -Path $coverR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $coverRollback = Assert-CoverRollback -Path $coverR4iPath
+    $receipt.cover_rollback_plan_sha256 = $coverRollback.PlanSha256
+    Assert-RolledBackCoverLedger -Path $coverLedgerPath | Out-Null
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "cover-r4i-rollback.json") -Force
+    Copy-Item $coverLedgerPath (Join-Path $EvidenceDir "cover-ledger-after-rollback.json") -Force
+    $receipt.phases.cover_rollback = "PASS"
+
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
     Remove-Item $r4iPath -Force
     if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
     if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
+    if (Test-Path $coverR4iPath) { Remove-Item $coverR4iPath -Force }
     if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
     $playniteProcess = Start-Playnite -DesktopExe $desktopExe -UserData $userData
@@ -747,6 +901,12 @@ try {
     $receipt.idempotent_filter_preset_rollback_plan_sha256 = $secondFilterPresetRollback.PlanSha256
     Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "filter-preset-r4i-second-rollback.json") -Force
     $receipt.phases.idempotent_filter_preset_rollback = "PASS"
+
+    Wait-ForFile -Path $coverR4iPath -Process $playniteProcess -TimeoutSeconds 20
+    $secondCoverRollback = Assert-IdempotentCoverRollback -Path $coverR4iPath
+    $receipt.idempotent_cover_rollback_plan_sha256 = $secondCoverRollback.PlanSha256
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "cover-r4i-second-rollback.json") -Force
+    $receipt.phases.idempotent_cover_rollback = "PASS"
 
     Stop-Playnite -DesktopExe $desktopExe -UserData $userData
 
@@ -782,7 +942,10 @@ try {
         $actionR4iPath,
         $actionLedgerPath,
         $filterPresetR4iPath,
-        $filterPresetLedgerPath
+        $filterPresetLedgerPath,
+        $coverEvidencePath,
+        $coverR4iPath,
+        $coverLedgerPath
     )) {
         if (-not (Test-Path $persistentPath -PathType Leaf)) {
             throw "Persistent plugin data did not survive native uninstall: $persistentPath"

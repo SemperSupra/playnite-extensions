@@ -54,18 +54,27 @@ namespace MediaLibraryEnrichment
             var actionReconcilePath = Path.Combine(dataPath, "action-r4i-receipt.json");
             var filterPresetLedgerPath = Path.Combine(dataPath, "filter-preset-ledger.json");
             var filterPresetReconcilePath = Path.Combine(dataPath, "filter-preset-r4i-receipt.json");
+            var coverEvidencePath = Path.Combine(dataPath, "cover-evidence.json");
+            var coverLedgerPath = Path.Combine(dataPath, "cover-ledger.json");
+            var coverReconcilePath = Path.Combine(dataPath, "cover-r4i-receipt.json");
 
             var settings = MediaLibraryEnrichmentSettings.LoadOrCreate(settingsPath);
             var categoryLedger = CategoryLedger.LoadOrCreate(categoryLedgerPath);
             var actionLedger = ActionLedger.LoadOrCreate(actionLedgerPath);
             var filterPresetLedger = FilterPresetLedger.LoadOrCreate(filterPresetLedgerPath);
+            var coverEvidence = CoverEvidenceSnapshot.LoadOrEmpty(coverEvidencePath);
+            var coverLedger = CoverLedger.LoadOrCreate(coverLedgerPath);
 
             CategoryReconcileReceipt categoryReceipt;
             ActionReconcileReceipt actionReceipt;
             FilterPresetReconcileReceipt filterPresetReceipt;
+            CoverReconcileReceipt coverReceipt;
 
             if (string.Equals(settings.Mode, "rollback", StringComparison.Ordinal))
             {
+                coverReceipt = RollbackCoverEnrichment(
+                    coverLedger,
+                    coverLedgerPath);
                 filterPresetReceipt = RollbackFilterPresetEnrichment(
                     filterPresetLedger,
                     filterPresetLedgerPath);
@@ -89,6 +98,10 @@ namespace MediaLibraryEnrichment
                 filterPresetReceipt = ApplyFilterPresetEnrichment(
                     filterPresetLedger,
                     filterPresetLedgerPath);
+                coverReceipt = ApplyCoverEnrichment(
+                    coverEvidence,
+                    coverLedger,
+                    coverLedgerPath);
             }
             else
             {
@@ -111,6 +124,13 @@ namespace MediaLibraryEnrichment
                     PlanSha256 = HashFilterPresetPlan(
                         new FilterPresetOperationReceipt[0])
                 };
+                coverReceipt = new CoverReconcileReceipt
+                {
+                    Mode = "observe",
+                    CandidateCount = coverEvidence.Items.Count,
+                    PlanSha256 = HashCoverPlan(
+                        new CoverOperationReceipt[0])
+                };
             }
 
             File.WriteAllText(
@@ -122,6 +142,9 @@ namespace MediaLibraryEnrichment
             File.WriteAllText(
                 filterPresetReconcilePath,
                 Serialization.ToJson(filterPresetReceipt, true));
+            File.WriteAllText(
+                coverReconcilePath,
+                Serialization.ToJson(coverReceipt, true));
         }
 
         private MediaObservation[] CaptureCandidates()

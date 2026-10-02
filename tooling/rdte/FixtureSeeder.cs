@@ -95,15 +95,38 @@ namespace SemperSupraRdteSeeder
                 return;
             }
 
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-cover-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-cover-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunCoverConflictFixture(dataPath, fixturePath, fixtureProfile);
+                return;
+            }
+
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
             var cbzPath = Path.Combine(fixturePath, "rdte-comic.cbz");
             var flacPath = Path.Combine(fixturePath, "rdte-soundtrack.flac");
+            var bookCoverPath = Path.Combine(fixturePath, "rdte-book-cover.png");
+            var comicCoverPath = Path.Combine(fixturePath, "rdte-comic-cover.png");
 
             EnsureFile(pdfPath, "%PDF-1.4\n% SemperSupra deterministic RDTE fixture\n");
             EnsureFile(epubPath, "SemperSupra RDTE EPUB placeholder\n");
             EnsureFile(cbzPath, "SemperSupra RDTE CBZ placeholder\n");
             EnsureFile(flacPath, "fLaC\nSemperSupra RDTE audio placeholder\n");
+            EnsureBytes(
+                bookCoverPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAwCAIAAAD/zu84AAAAL0lEQVR4nO3NQQEAAATAQISTWEAl+N0C7HK647N6vQMAAAAAAAAAAAAAAAAAAI5bNqQBoI/pblYAAAAASUVORK5CYII="));
+            EnsureBytes(
+                comicCoverPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAwCAIAAAD/zu84AAAAMklEQVR4nO3NMQEAMAjAsDFxKEEiAjEBXyqgiax+l/3TOwAAAAAAAAAAAAAAAAAAYLkBV0oBvtuG7qwAAAAASUVORK5CYII="));
 
             using (PlayniteApi.Database.BufferedUpdate())
             {
@@ -524,11 +547,123 @@ namespace SemperSupraRdteSeeder
                     true));
         }
 
+
+        private void RunCoverConflictFixture(
+            string dataPath,
+            string fixturePath,
+            string fixtureProfile)
+        {
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-cover-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var externalPath = Path.Combine(fixturePath, "external-book-cover.png");
+            var statePath = Path.Combine(dataPath, "cover-conflict-state.txt");
+            EnsureBytes(
+                externalPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAwCAIAAAD/zu84AAAAMklEQVR4nO3NMQEAMAjAsDFxiEAdUjEBXyqgiex6l/3TOwAAAAAAAAAAAAAAAAAAYLkBNiIBoDCEHzMAAAAASUVORK5CYII="));
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Humble Ebook fixture is unavailable.");
+                }
+
+                if (apply)
+                {
+                    if (string.IsNullOrWhiteSpace(game.CoverImage))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected plugin-projected Book CoverImage before external mutation.");
+                    }
+
+                    var externalDatabasePath =
+                        PlayniteApi.Database.AddFile(externalPath, game.Id);
+                    game.CoverImage = externalDatabasePath;
+                    PlayniteApi.Database.Games.Update(game);
+                    File.WriteAllText(statePath, externalDatabasePath);
+                }
+
+                if (!File.Exists(statePath))
+                {
+                    throw new InvalidOperationException(
+                        "External cover state receipt is unavailable.");
+                }
+
+                var expectedDatabasePath = File.ReadAllText(statePath).Trim();
+                var verified = PlayniteApi.Database.Games.Get(GameBook);
+                var preserved =
+                    verified != null &&
+                    string.Equals(
+                        verified.CoverImage,
+                        expectedDatabasePath,
+                        StringComparison.Ordinal);
+
+                if (!preserved)
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed Book CoverImage is not present.");
+                }
+
+                var fullPath =
+                    PlayniteApi.Database.GetFullFilePath(expectedDatabasePath);
+                if (string.IsNullOrWhiteSpace(fullPath) ||
+                    !File.Exists(fullPath))
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed Book cover database file is unavailable.");
+                }
+
+                detail = apply
+                    ? "External Book CoverImage mutation applied and verified."
+                    : "External Book CoverImage mutation remains present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var current = PlayniteApi.Database.Games.Get(GameBook);
+            File.WriteAllText(
+                Path.Combine(dataPath, "cover-conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-cover-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        cover_image_present =
+                            current != null &&
+                            !string.IsNullOrWhiteSpace(current.CoverImage),
+                        external_source_name = Path.GetFileName(externalPath),
+                        detail = detail
+                    },
+                    true));
+        }
+
         private static void EnsureFile(string path, string content)
         {
             if (!File.Exists(path) || File.ReadAllText(path) != content)
             {
                 File.WriteAllText(path, content);
+            }
+        }
+
+        private static void EnsureBytes(string path, byte[] content)
+        {
+            if (!File.Exists(path) ||
+                !File.ReadAllBytes(path).SequenceEqual(content))
+            {
+                File.WriteAllBytes(path, content);
             }
         }
 

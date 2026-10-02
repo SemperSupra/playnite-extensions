@@ -360,6 +360,64 @@ function Assert-FilterPresetConflictRollback {
     return $value
 }
 
+function Assert-CoverReapply {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Schema -ne "sempersupra-media-library-enrichment-cover-r4i/v1" -or
+        $value.Mode -ne "apply" -or
+        $value.CandidateCount -ne 2 -or
+        $value.AppliedCount -ne 2 -or
+        $value.NoopCount -ne 0 -or
+        $value.ConflictCount -ne 0 -or
+        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 2) {
+        throw "Cover re-apply did not reproduce two clean native CoverImage mutations."
+    }
+
+    return $value
+}
+
+function Assert-CoverConflictReceipt {
+    param([string]$Path, [ValidateSet("apply", "verify")][string]$ExpectedMode)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.schema -ne "sempersupra-playnite-r4i-cover-conflict-fixture/v1" -or
+        $value.mode -ne $ExpectedMode -or
+        $value.result -ne "PASS" -or
+        $value.book_game_id -ne "73000000-0000-4000-8000-000000000001" -or
+        $value.cover_image_present -ne $true -or
+        $value.external_source_name -ne "external-book-cover.png") {
+        throw "Cover conflict fixture did not prove preserved external Book cover state for '$ExpectedMode'."
+    }
+
+    return $value
+}
+
+function Assert-CoverConflictRollback {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.Mode -ne "rollback" -or
+        $value.CandidateCount -ne 2 -or
+        $value.RollbackAppliedCount -ne 1 -or
+        $value.ConflictCount -ne 1) {
+        throw "Cover conflict rollback did not prove one owned removal plus one preserved external mutation."
+    }
+
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 1) {
+        throw "Cover conflict rollback did not remove exactly one still-owned cover."
+    }
+
+    $preserved = @($value.Operations | Where-Object Outcome -eq "CONFLICT_COVER_CHANGED")
+    if ($preserved.Count -ne 1 -or
+        $preserved[0].PlayniteId -ne "73000000-0000-4000-8000-000000000001" -or
+        $preserved[0].EvidenceKey -ne "rdte-book-cover-v1") {
+        throw "Cover conflict rollback did not preserve the externally changed Ebook CoverImage."
+    }
+
+    return $value
+}
+
 function Native-InstallAndRun {
     param(
         [string]$PackagePath,
@@ -445,6 +503,10 @@ $receipt = [ordered]@{
         filter_preset_conflict_inject = "NOT_RUN"
         filter_preset_conflict_rollback = "NOT_RUN"
         filter_preset_conflict_verify = "NOT_RUN"
+        cover_reapply = "NOT_RUN"
+        cover_conflict_inject = "NOT_RUN"
+        cover_conflict_rollback = "NOT_RUN"
+        cover_conflict_verify = "NOT_RUN"
         product_uninstall = "NOT_RUN"
         data_preservation = "NOT_RUN"
     }
@@ -714,6 +776,86 @@ try {
     Stop-Playnite
     Native-Uninstall -InstalledDir $filterPresetSeederVerify.InstalledDir
 
+    Set-ProductMode -Mode "apply"
+    $coverR4iPath = Join-Path $userData "ExtensionsData\$pluginId\cover-r4i-receipt.json"
+    if (Test-Path $r4iPath) {
+        Remove-Item $r4iPath -Force
+    }
+    if (Test-Path $actionR4iPath) {
+        Remove-Item $actionR4iPath -Force
+    }
+    if (Test-Path $filterPresetR4iPath) {
+        Remove-Item $filterPresetR4iPath -Force
+    }
+    if (Test-Path $coverR4iPath) {
+        Remove-Item $coverR4iPath -Force
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $coverR4iPath -Process $productProcess
+    $coverReapply = Assert-CoverReapply -Path $coverR4iPath
+    $receipt.cover_reapply_plan_sha256 = $coverReapply.PlanSha256
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "cover-conflict-reapply.json") -Force
+    $receipt.phases.cover_reapply = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
+    Set-ProductMode -Mode "observe"
+
+    Set-Content -Path $profilePath -Value "r4i-cover-conflict-apply-v1" -Encoding UTF8
+    $coverConflictPath = Join-Path $seederData "cover-conflict-receipt.json"
+    if (Test-Path $coverConflictPath) {
+        Remove-Item $coverConflictPath -Force
+    }
+
+    $coverSeederInstall = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $coverConflictPath
+    Assert-CoverConflictReceipt -Path $coverConflictPath -ExpectedMode "apply" | Out-Null
+    Copy-Item $coverConflictPath (Join-Path $EvidenceDir "external-cover-conflict-applied.json") -Force
+    $receipt.phases.cover_conflict_inject = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $coverSeederInstall.InstalledDir
+
+    Set-ProductMode -Mode "rollback"
+    foreach ($path in @($r4iPath, $actionR4iPath, $filterPresetR4iPath, $coverR4iPath)) {
+        if (Test-Path $path) {
+            Remove-Item $path -Force
+        }
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $coverR4iPath -Process $productProcess
+
+    $coverConflictRollback = Assert-CoverConflictRollback -Path $coverR4iPath
+    $receipt.cover_conflict_rollback_plan_sha256 = $coverConflictRollback.PlanSha256
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "cover-conflict-rollback.json") -Force
+    $receipt.phases.cover_conflict_rollback = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
+    Set-ProductMode -Mode "observe"
+
+    Set-Content -Path $profilePath -Value "r4i-cover-conflict-verify-v1" -Encoding UTF8
+    if (Test-Path $coverConflictPath) {
+        Remove-Item $coverConflictPath -Force
+    }
+
+    $coverSeederVerify = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $coverConflictPath
+    Assert-CoverConflictReceipt -Path $coverConflictPath -ExpectedMode "verify" | Out-Null
+    Copy-Item $coverConflictPath (Join-Path $EvidenceDir "external-cover-conflict-verified.json") -Force
+    $receipt.phases.cover_conflict_verify = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $coverSeederVerify.InstalledDir
+
     Native-Uninstall -InstalledDir $productInstalledDir
     $receipt.phases.product_uninstall = "PASS"
 
@@ -726,7 +868,10 @@ try {
         "action-r4i-receipt.json",
         "action-ledger.json",
         "filter-preset-r4i-receipt.json",
-        "filter-preset-ledger.json"
+        "filter-preset-ledger.json",
+        "cover-evidence.json",
+        "cover-r4i-receipt.json",
+        "cover-ledger.json"
     )) {
         if (-not (Test-Path (Join-Path $pluginData $name) -PathType Leaf)) {
             throw "Persistent plugin data did not survive final native uninstall: $name"
