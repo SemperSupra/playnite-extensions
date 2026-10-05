@@ -25,7 +25,7 @@ jobs:
         env:
           RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           RDTE_TRIGGER_SHA: ${{ github.sha }}
-          RDTE_PRODUCT_AUTHORITY_SHA: 75531174cc33574f34d744e7473f4e3e63fafc8c
+          RDTE_PRODUCT_AUTHORITY_SHA: 3b3dda94264318d2f198a9dce03693bf1ca6fcb4
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP "media-library-enrichment-rdte"
