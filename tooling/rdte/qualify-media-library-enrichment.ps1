@@ -157,18 +157,18 @@ function Assert-ObservationReceipt {
     if ($observation.Schema -ne "sempersupra-media-library-enrichment-observation/v1") {
         throw "Unexpected Media Library Enrichment observation schema."
     }
-    if ($observation.FixtureContract -ne "media-admission-v1") {
-        throw "Observation receipt is not bound to media-admission-v1."
+    if ($observation.FixtureContract -ne "media-admission-variants-v1") {
+        throw "Observation receipt is not bound to media-admission-variants-v1."
     }
     if ($observation.CandidateCount -ne 4 -or @($observation.Candidates).Count -ne 4) {
         throw "Expected three Humble candidates plus one explicit non-Humble media candidate."
     }
 
     $expected = @{
-        "RDTE Humble Ebook" = [ordered]@{ Kind = "book"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-ebook" }
-        "RDTE Humble Comic" = [ordered]@{ Kind = "comic"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-comic" }
-        "RDTE Humble Soundtrack" = [ordered]@{ Kind = "audio"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-soundtrack" }
-        "RDTE Manual Media Book" = [ordered]@{ Kind = "book"; Source = "Manual RDTE"; Producer = "rdte-manual-evidence-v1"; Key = "rdte-manual-media-book-v1" }
+        "RDTE Humble Ebook" = [ordered]@{ Kind = "book"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-ebook"; Variants = @("rdte-book.epub", "rdte-book.pdf") }
+        "RDTE Humble Comic" = [ordered]@{ Kind = "comic"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-comic"; Variants = @("rdte-comic.cbz") }
+        "RDTE Humble Soundtrack" = [ordered]@{ Kind = "audio"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-soundtrack"; Variants = @("rdte-soundtrack.flac") }
+        "RDTE Manual Media Book" = [ordered]@{ Kind = "book"; Source = "Manual RDTE"; Producer = "rdte-manual-evidence-v1"; Key = "rdte-manual-media-book-v1"; Variants = @("rdte-book.pdf") }
     }
 
     foreach ($candidate in @($observation.Candidates)) {
@@ -184,6 +184,12 @@ function Assert-ObservationReceipt {
         }
         if (-not $candidate.CoverMissing) {
             throw "Candidate '$($candidate.Name)' does not have the expected missing-cover state."
+        }
+
+        $actualVariants = @($candidate.LocalEvidenceNames | Sort-Object)
+        $expectedVariants = @($want.Variants | Sort-Object)
+        if (@(Compare-Object $expectedVariants $actualVariants).Count -ne 0) {
+            throw "Candidate '$($candidate.Name)' local variant inventory does not match the normalized fixture evidence."
         }
     }
 
@@ -791,6 +797,13 @@ try {
         candidate_count = $firstObservation.CandidateCount
         names = @($firstObservation.Candidates | ForEach-Object Name | Sort-Object)
         kinds = @($firstObservation.Candidates | Sort-Object Name | ForEach-Object { "$($_.Name):$($_.Kind)" })
+        variants = @(
+            $firstObservation.Candidates |
+                Sort-Object Name |
+                ForEach-Object {
+                    "$($_.Name):$([string]::Join(',', @($_.LocalEvidenceNames)))"
+                }
+        )
     }
     Copy-Item $observationPath (Join-Path $EvidenceDir "observation-first.json") -Force
     $receipt.phases.observation_oracle = "PASS"
