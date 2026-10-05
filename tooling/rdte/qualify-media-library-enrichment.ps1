@@ -149,6 +149,7 @@ function Set-ReconcileMode {
         Set-Content -Path $Path -Encoding UTF8
 }
 
+
 function Assert-ObservationReceipt {
     param([string]$Path)
 
@@ -156,36 +157,38 @@ function Assert-ObservationReceipt {
     if ($observation.Schema -ne "sempersupra-media-library-enrichment-observation/v1") {
         throw "Unexpected Media Library Enrichment observation schema."
     }
-    if ($observation.FixtureContract -ne "media-raw-v1") {
-        throw "Observation receipt is not bound to media-raw-v1."
+    if ($observation.FixtureContract -ne "media-admission-v1") {
+        throw "Observation receipt is not bound to media-admission-v1."
     }
-    if ($observation.CandidateCount -ne 3 -or @($observation.Candidates).Count -ne 3) {
-        throw "Expected exactly three raw Humble missing-cover candidates."
+    if ($observation.CandidateCount -ne 4 -or @($observation.Candidates).Count -ne 4) {
+        throw "Expected three Humble candidates plus one explicit non-Humble media candidate."
     }
 
     $expected = @{
-        "RDTE Humble Ebook" = "book"
-        "RDTE Humble Comic" = "comic"
-        "RDTE Humble Soundtrack" = "audio"
+        "RDTE Humble Ebook" = [ordered]@{ Kind = "book"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-ebook" }
+        "RDTE Humble Comic" = [ordered]@{ Kind = "comic"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-comic" }
+        "RDTE Humble Soundtrack" = [ordered]@{ Kind = "audio"; Source = "Humble Bundle RDTE"; Producer = "humble-source-v1"; Key = "humble-source:rdte-humble-soundtrack" }
+        "RDTE Manual Media Book" = [ordered]@{ Kind = "book"; Source = "Manual RDTE"; Producer = "rdte-manual-evidence-v1"; Key = "rdte-manual-media-book-v1" }
     }
 
     foreach ($candidate in @($observation.Candidates)) {
         if (-not $expected.ContainsKey($candidate.Name)) {
             throw "Unexpected observation candidate '$($candidate.Name)'."
         }
-        if ($candidate.Source -ne "Humble Bundle RDTE") {
-            throw "Candidate '$($candidate.Name)' has unexpected source '$($candidate.Source)'."
+        $want = $expected[$candidate.Name]
+        if ($candidate.Source -ne $want.Source -or
+            $candidate.Kind -ne $want.Kind -or
+            $candidate.AdmissionProducerKind -ne $want.Producer -or
+            $candidate.AdmissionEvidenceKey -ne $want.Key) {
+            throw "Candidate '$($candidate.Name)' does not match its normalized admission contract."
         }
         if (-not $candidate.CoverMissing) {
             throw "Candidate '$($candidate.Name)' does not have the expected missing-cover state."
         }
-        if ($candidate.Kind -ne $expected[$candidate.Name]) {
-            throw "Candidate '$($candidate.Name)' kind '$($candidate.Kind)' does not match '$($expected[$candidate.Name])'."
-        }
     }
 
     if (@($observation.Candidates | Where-Object Name -eq "RDTE Manual Game").Count -ne 0) {
-        throw "Manual control fixture was incorrectly admitted as a Humble media candidate."
+        throw "Ordinary manual-game control was incorrectly admitted without explicit evidence."
     }
 
     return $observation
@@ -197,20 +200,21 @@ function Assert-FirstApply {
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Schema -ne "sempersupra-media-library-enrichment-category-r4i/v1" -or
         $value.Mode -ne "apply" -or
-        $value.CandidateCount -ne 3 -or
-        $value.AppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.AppliedCount -ne 4 -or
         $value.NoopCount -ne 0 -or
         $value.ConflictCount -ne 0) {
-        throw "First R4I apply receipt does not prove exactly three clean mutations."
+        throw "First R4I apply receipt does not prove exactly four clean membership mutations."
     }
 
     $applied = @($value.Operations | Where-Object Outcome -eq "APPLIED")
-    if ($applied.Count -ne 3) {
-        throw "Expected exactly three APPLIED category operations."
+    if ($applied.Count -ne 4) {
+        throw "Expected exactly four APPLIED category operations."
     }
 
     $expectedNames = @(
         "SemperSupra.Media:Audio",
+        "SemperSupra.Media:Book",
         "SemperSupra.Media:Book",
         "SemperSupra.Media:Comic"
     )
@@ -227,15 +231,15 @@ function Assert-IdempotentApply {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "apply" -or
-        $value.CandidateCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
         $value.AppliedCount -ne 0 -or
-        $value.NoopCount -ne 3 -or
+        $value.NoopCount -ne 4 -or
         $value.ConflictCount -ne 0) {
-        throw "Second apply is not a clean three-item NOOP."
+        throw "Second apply is not a clean four-item NOOP."
     }
 
-    if (@($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 3) {
-        throw "Second apply did not report exactly three NOOP operations."
+    if (@($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 4) {
+        throw "Second apply did not report exactly four NOOP operations."
     }
 
     return $value
@@ -246,14 +250,14 @@ function Assert-Rollback {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "rollback" -or
-        $value.CandidateCount -ne 3 -or
-        $value.RollbackAppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.RollbackAppliedCount -ne 4 -or
         $value.ConflictCount -ne 0) {
-        throw "Rollback receipt does not prove three clean owned-membership reversions."
+        throw "Rollback receipt does not prove four clean owned-membership reversions."
     }
 
-    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
-        throw "Rollback did not remove exactly three owned memberships."
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 4) {
+        throw "Rollback did not remove exactly four owned memberships."
     }
     if (@($value.Operations | Where-Object Outcome -eq "CATEGORY_REMOVED").Count -ne 3) {
         throw "Rollback did not remove and verify exactly three plugin-created category objects."
@@ -282,14 +286,15 @@ function Assert-RolledBackLedger {
 
     $ledger = Get-Content $Path -Raw | ConvertFrom-Json
     $entries = @($ledger.Entries)
-    if ($entries.Count -ne 3) {
-        throw "Expected three ownership-ledger entries."
+    if ($entries.Count -ne 4) {
+        throw "Expected four ownership-ledger entries."
     }
     if (@($entries | Where-Object Status -ne "ROLLED_BACK").Count -ne 0) {
         throw "Ownership ledger contains an entry that is not ROLLED_BACK."
     }
-    if (@($entries | Where-Object CategoryCreated -ne $true).Count -ne 0) {
-        throw "Expected this raw-fixture rep to own creation of all three category objects."
+    if (@($entries | Where-Object CategoryCreated -eq $true).Count -ne 3 -or
+        @($entries | Where-Object CategoryCreated -ne $true).Count -ne 1) {
+        throw "Expected three category-object creations and one shared Book-category membership."
     }
 
     return $ledger
@@ -302,22 +307,23 @@ function Assert-FirstActionApply {
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Schema -ne "sempersupra-media-library-enrichment-action-r4i/v1" -or
         $value.Mode -ne "apply" -or
-        $value.CandidateCount -ne 3 -or
-        $value.AppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.AppliedCount -ne 4 -or
         $value.NoopCount -ne 0 -or
         $value.ConflictCount -ne 0) {
-        throw "First action apply does not prove exactly three clean custom-action mutations."
+        throw "First action apply does not prove exactly four clean custom-action mutations."
     }
 
     $applied = @($value.Operations | Where-Object Outcome -eq "APPLIED")
-    if ($applied.Count -ne 3 -or @($applied | Where-Object IsPlayAction -eq $true).Count -ne 0) {
-        throw "Action apply must materialize exactly three non-play custom actions."
+    if ($applied.Count -ne 4 -or @($applied | Where-Object IsPlayAction -eq $true).Count -ne 0) {
+        throw "Action apply must materialize exactly four non-play custom actions."
     }
 
     $expected = @(
         "RDTE Humble Comic|Read|rdte-comic.cbz",
         "RDTE Humble Ebook|Read|rdte-book.pdf",
-        "RDTE Humble Soundtrack|Listen|rdte-soundtrack.flac"
+        "RDTE Humble Soundtrack|Listen|rdte-soundtrack.flac",
+        "RDTE Manual Media Book|Read|rdte-book.pdf"
     )
     $actual = @(
         $applied |
@@ -336,12 +342,12 @@ function Assert-IdempotentActionApply {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "apply" -or
-        $value.CandidateCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
         $value.AppliedCount -ne 0 -or
-        $value.NoopCount -ne 3 -or
+        $value.NoopCount -ne 4 -or
         $value.ConflictCount -ne 0 -or
-        @($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 3) {
-        throw "Second action apply is not a clean three-action NOOP."
+        @($value.Operations | Where-Object Outcome -eq "NOOP").Count -ne 4) {
+        throw "Second action apply is not a clean four-action NOOP."
     }
 
     return $value
@@ -352,11 +358,11 @@ function Assert-ActionRollback {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "rollback" -or
-        $value.CandidateCount -ne 3 -or
-        $value.RollbackAppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.RollbackAppliedCount -ne 4 -or
         $value.ConflictCount -ne 0 -or
-        @($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
-        throw "Action rollback did not remove exactly three owned custom actions."
+        @($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 4) {
+        throw "Action rollback did not remove exactly four owned custom actions."
     }
 
     return $value
@@ -382,9 +388,9 @@ function Assert-RolledBackActionLedger {
 
     $ledger = Get-Content $Path -Raw | ConvertFrom-Json
     $entries = @($ledger.Entries)
-    if ($entries.Count -ne 3 -or
+    if ($entries.Count -ne 4 -or
         @($entries | Where-Object Status -ne "ROLLED_BACK").Count -ne 0) {
-        throw "Expected three ROLLED_BACK action-ledger entries."
+        throw "Expected four ROLLED_BACK action-ledger entries."
     }
 
     return $ledger
@@ -703,6 +709,7 @@ try {
     $actionLedgerPath = Join-Path $pluginData "action-ledger.json"
     $filterPresetR4iPath = Join-Path $pluginData "filter-preset-r4i-receipt.json"
     $filterPresetLedgerPath = Join-Path $pluginData "filter-preset-ledger.json"
+    $admissionEvidencePath = Join-Path $pluginData "admission-evidence.json"
     $coverEvidencePath = Join-Path $pluginData "cover-evidence.json"
     $coverR4iPath = Join-Path $pluginData "cover-r4i-receipt.json"
     $coverLedgerPath = Join-Path $pluginData "cover-ledger.json"
@@ -739,6 +746,20 @@ try {
     }
     ConvertTo-Json -InputObject $coverEvidence -Depth 6 |
         Set-Content -Path $coverEvidencePath -Encoding UTF8
+
+    $admissionEvidence = [ordered]@{
+        Schema = "sempersupra-media-library-enrichment-admission-evidence/v1"
+        Items = @(
+            [ordered]@{
+                PlayniteId = "73000000-0000-4000-8000-000000000005"
+                ProviderGameId = "rdte-manual-media-book"
+                EvidenceKey = "rdte-manual-media-book-v1"
+                ProducerKind = "rdte-manual-evidence-v1"
+            }
+        )
+    }
+    ConvertTo-Json -InputObject $admissionEvidence -Depth 6 |
+        Set-Content -Path $admissionEvidencePath -Encoding UTF8
 
     Set-ReconcileMode -Path $settingsPath -Mode "apply"
 
