@@ -564,8 +564,8 @@ try {
         }
 
         $firstSeed = Get-Content $seedReceiptPath -Raw | ConvertFrom-Json
-        if ($firstSeed.expected_fixture_games -ne 4 -or $firstSeed.observed_fixture_games -ne 4) {
-            throw "Fixture seeder did not create exactly four expected fixture games."
+        if ($firstSeed.expected_fixture_games -ne 5 -or $firstSeed.observed_fixture_games -ne 5) {
+            throw "Fixture seeder did not create exactly five expected fixture games."
         }
         $receipt.fixture_seeder.first_seed = $firstSeed
         Copy-Item $seedReceiptPath (Join-Path $EvidenceDir "seed-first.json") -Force
@@ -589,8 +589,8 @@ try {
         }
 
         $secondSeed = Get-Content $seedReceiptPath -Raw | ConvertFrom-Json
-        if ($secondSeed.expected_fixture_games -ne 4 -or
-            $secondSeed.observed_fixture_games -ne 4 -or
+        if ($secondSeed.expected_fixture_games -ne 5 -or
+            $secondSeed.observed_fixture_games -ne 5 -or
             $secondSeed.total_library_games -ne $firstSeed.total_library_games) {
             throw "Fixture seeder is not idempotent across restart."
         }
