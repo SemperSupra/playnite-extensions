@@ -85,7 +85,7 @@ function Wait-ForText {
         }
         if (Test-Path $Path) {
             $content = Get-Content $Path -Raw
-            if ($content.Contains($Text)) {
+            if ($null -ne $content -and $content.Contains($Text)) {
                 return
             }
         }
@@ -485,6 +485,80 @@ function Native-Uninstall {
     }
 }
 
+function Assert-NativePersistenceReceipt {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.schema -ne "sempersupra-playnite-native-persistence-fixture/v1" -or
+        $value.result -ne "PASS" -or
+        $value.category_memberships -ne 4 -or
+        $value.custom_actions -ne 4 -or
+        $value.filter_presets -ne 3 -or
+        $value.cover_images -ne 2 -or
+        $value.local_files_present -ne $true) {
+        throw "Native persistence fixture did not prove the complete surviving enrichment set."
+    }
+
+    return $value
+}
+
+function Assert-PersistenceReconcile {
+    param(
+        [string]$CategoryPath,
+        [string]$ActionPath,
+        [string]$FilterPresetPath,
+        [string]$CoverPath
+    )
+
+    $category = Get-Content $CategoryPath -Raw | ConvertFrom-Json
+    $action = Get-Content $ActionPath -Raw | ConvertFrom-Json
+    $filterPreset = Get-Content $FilterPresetPath -Raw | ConvertFrom-Json
+    $cover = Get-Content $CoverPath -Raw | ConvertFrom-Json
+
+    if ($category.Mode -ne "apply" -or
+        $category.CandidateCount -ne 4 -or
+        $category.AppliedCount -ne 0 -or
+        $category.NoopCount -ne 4 -or
+        $category.ConflictCount -ne 0 -or
+        @($category.Operations | Where-Object Outcome -eq "NOOP").Count -ne 4) {
+        throw "Reinstall did not reconcile surviving category memberships as four NOOPs."
+    }
+
+    if ($action.Mode -ne "apply" -or
+        $action.CandidateCount -ne 4 -or
+        $action.AppliedCount -ne 0 -or
+        $action.NoopCount -ne 4 -or
+        $action.ConflictCount -ne 0 -or
+        @($action.Operations | Where-Object Outcome -eq "NOOP").Count -ne 4) {
+        throw "Reinstall did not reconcile surviving custom actions as four NOOPs."
+    }
+
+    if ($filterPreset.Mode -ne "apply" -or
+        $filterPreset.CandidateCount -ne 3 -or
+        $filterPreset.AppliedCount -ne 0 -or
+        $filterPreset.NoopCount -ne 3 -or
+        $filterPreset.ConflictCount -ne 0 -or
+        @($filterPreset.Operations | Where-Object Outcome -eq "NOOP").Count -ne 3) {
+        throw "Reinstall did not reconcile surviving media shelves as three NOOPs."
+    }
+
+    if ($cover.Mode -ne "apply" -or
+        $cover.CandidateCount -ne 2 -or
+        $cover.AppliedCount -ne 0 -or
+        $cover.NoopCount -ne 2 -or
+        $cover.ConflictCount -ne 0 -or
+        @($cover.Operations | Where-Object Outcome -eq "NOOP").Count -ne 2) {
+        throw "Reinstall did not reconcile surviving CoverImage state as two NOOPs."
+    }
+
+    return [pscustomobject]@{
+        CategoryPlanSha256 = $category.PlanSha256
+        ActionPlanSha256 = $action.PlanSha256
+        FilterPresetPlanSha256 = $filterPreset.PlanSha256
+        CoverPlanSha256 = $cover.PlanSha256
+    }
+}
+
 $receipt = [ordered]@{
     schema = "sempersupra-media-library-enrichment-r4i-conflict-rdte/v1"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
@@ -492,6 +566,10 @@ $receipt = [ordered]@{
     phases = [ordered]@{
         product_present = "NOT_RUN"
         reapply = "NOT_RUN"
+        native_persistence_uninstall = "NOT_RUN"
+        native_persistence_verify = "NOT_RUN"
+        native_persistence_reinstall = "NOT_RUN"
+        native_persistence_reconcile = "NOT_RUN"
         external_conflict_inject = "NOT_RUN"
         conflict_rollback = "NOT_RUN"
         external_conflict_verify = "NOT_RUN"
@@ -548,8 +626,15 @@ try {
     }
     $receipt.phases.product_present = "PASS"
 
+    $seederData = Join-Path $userData "ExtensionsData\$seederDataId"
+    New-Item $seederData -ItemType Directory -Force | Out-Null
+    $profilePath = Join-Path $seederData "fixture-profile.txt"
+
     Set-ProductMode -Mode "apply"
     $r4iPath = Join-Path $userData "ExtensionsData\$pluginId\r4i-receipt.json"
+    $actionR4iPath = Join-Path $userData "ExtensionsData\$pluginId\action-r4i-receipt.json"
+    $filterPresetR4iPath = Join-Path $userData "ExtensionsData\$pluginId\filter-preset-r4i-receipt.json"
+    $coverR4iPath = Join-Path $userData "ExtensionsData\$pluginId\cover-r4i-receipt.json"
     if (Test-Path $r4iPath) {
         Remove-Item $r4iPath -Force
     }
@@ -567,11 +652,84 @@ try {
 
     Stop-Playnite
     $productProcess = $null
+
+    # Release gate: native enrichment must remain useful after product uninstall
+    # when rollback was not requested.
+    Set-ProductMode -Mode "observe"
+    Native-Uninstall -InstalledDir $productInstalledDir
+    $receipt.phases.native_persistence_uninstall = "PASS"
+
+    $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
+    foreach ($name in @(
+        "settings.json",
+        "admission-evidence.json",
+        "category-ledger.json",
+        "action-ledger.json",
+        "filter-preset-ledger.json",
+        "cover-evidence.json",
+        "cover-ledger.json"
+    )) {
+        if (-not (Test-Path (Join-Path $pluginData $name) -PathType Leaf)) {
+            throw "Plugin-owned reconciliation data did not survive native uninstall: $name"
+        }
+    }
+
+    $nativePersistencePath = Join-Path $seederData "native-persistence-receipt.json"
+    Set-Content -Path $profilePath -Value "r4i-native-persistence-verify-v1" -Encoding UTF8
+    if (Test-Path $nativePersistencePath) {
+        Remove-Item $nativePersistencePath -Force
+    }
+
+    $persistenceSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $nativePersistencePath
+    $nativePersistence = Assert-NativePersistenceReceipt -Path $nativePersistencePath
+    $receipt.native_persistence = [ordered]@{
+        category_memberships = $nativePersistence.category_memberships
+        custom_actions = $nativePersistence.custom_actions
+        filter_presets = $nativePersistence.filter_presets
+        cover_images = $nativePersistence.cover_images
+        local_files_present = $nativePersistence.local_files_present
+    }
+    Copy-Item $nativePersistencePath (Join-Path $EvidenceDir "native-persistence-after-uninstall.json") -Force
+    $receipt.phases.native_persistence_verify = "PASS"
+
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $persistenceSeeder.InstalledDir
+
+    Set-ProductMode -Mode "apply"
+    foreach ($path in @($r4iPath, $actionR4iPath, $filterPresetR4iPath, $coverR4iPath)) {
+        if (Test-Path $path) {
+            Remove-Item $path -Force
+        }
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+
+    $reinstalledProduct = Native-InstallAndRun -PackagePath $pluginPackage -ExpectedId $pluginId -ExpectedName $pluginName -ExpectedVersion $productVersion -ReadyFile $r4iPath
+    $productInstalledDir = $reinstalledProduct.InstalledDir
+    $productProcess = $reinstalledProduct.Process
+    Wait-ForFile -Path $actionR4iPath -Process $productProcess
+    Wait-ForFile -Path $filterPresetR4iPath -Process $productProcess
+    Wait-ForFile -Path $coverR4iPath -Process $productProcess
+    $receipt.phases.native_persistence_reinstall = "PASS"
+
+    $persistenceReconcile = Assert-PersistenceReconcile -CategoryPath $r4iPath -ActionPath $actionR4iPath -FilterPresetPath $filterPresetR4iPath -CoverPath $coverR4iPath
+    $receipt.native_persistence_reconcile_plan_sha256 = [ordered]@{
+        category = $persistenceReconcile.CategoryPlanSha256
+        action = $persistenceReconcile.ActionPlanSha256
+        filter_preset = $persistenceReconcile.FilterPresetPlanSha256
+        cover = $persistenceReconcile.CoverPlanSha256
+    }
+    Copy-Item $r4iPath (Join-Path $EvidenceDir "native-persistence-category-noop.json") -Force
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "native-persistence-action-noop.json") -Force
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "native-persistence-filter-preset-noop.json") -Force
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "native-persistence-cover-noop.json") -Force
+    $receipt.phases.native_persistence_reconcile = "PASS"
+
+    Stop-Playnite
+    $productProcess = $null
     Set-ProductMode -Mode "observe"
 
-    $seederData = Join-Path $userData "ExtensionsData\$seederDataId"
-    New-Item $seederData -ItemType Directory -Force | Out-Null
-    $profilePath = Join-Path $seederData "fixture-profile.txt"
     $conflictPath = Join-Path $seederData "conflict-receipt.json"
     Set-Content -Path $profilePath -Value "r4i-conflict-apply-v1" -Encoding UTF8
     if (Test-Path $conflictPath) {
