@@ -60,25 +60,16 @@ namespace MediaLibraryEnrichment
                     var searchStart = 0;
                     while (searchStart < notes.Length)
                     {
-                        var index = notes.IndexOf(
+                        var index = FindTerminalExtension(
+                            notes,
                             extension,
-                            searchStart,
-                            StringComparison.OrdinalIgnoreCase);
+                            searchStart);
                         if (index < 0)
                         {
                             break;
                         }
 
                         var end = index + extension.Length;
-                        if (end < notes.Length &&
-                            (char.IsLetterOrDigit(notes[end]) ||
-                             notes[end] == '.' ||
-                             notes[end] == '_' ||
-                             notes[end] == '-'))
-                        {
-                            searchStart = end;
-                            continue;
-                        }
 
                         var prefix = notes.Substring(0, end);
                         var semicolon = prefix.LastIndexOf(';');
@@ -143,13 +134,13 @@ namespace MediaLibraryEnrichment
 
             foreach (var extension in extensions)
             {
-                var end = notes.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
-                if (end < 0)
+                var index = FindTerminalExtension(notes, extension, 0);
+                if (index < 0)
                 {
                     continue;
                 }
 
-                end += extension.Length;
+                var end = index + extension.Length;
                 var prefix = notes.Substring(0, end);
                 var semicolon = prefix.LastIndexOf("; ", StringComparison.Ordinal);
                 var label = prefix.LastIndexOf(": ", StringComparison.Ordinal);
@@ -191,13 +182,45 @@ namespace MediaLibraryEnrichment
 
             foreach (var extension in extensions)
             {
-                if (text.IndexOf(extension, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (FindTerminalExtension(text, extension, 0) >= 0)
                 {
                     return ClassifyExtension(extension);
                 }
             }
 
             return "unresolved";
+        }
+
+        private static int FindTerminalExtension(
+            string text,
+            string extension,
+            int searchStart)
+        {
+            while (!string.IsNullOrEmpty(text) && searchStart < text.Length)
+            {
+                var index = text.IndexOf(
+                    extension,
+                    searchStart,
+                    StringComparison.OrdinalIgnoreCase);
+                if (index < 0)
+                {
+                    return -1;
+                }
+
+                var end = index + extension.Length;
+                if (end >= text.Length ||
+                    (!char.IsLetterOrDigit(text[end]) &&
+                     text[end] != '.' &&
+                     text[end] != '_' &&
+                     text[end] != '-'))
+                {
+                    return index;
+                }
+
+                searchStart = end;
+            }
+
+            return -1;
         }
 
         private static string ClassifyExtension(string extension)
