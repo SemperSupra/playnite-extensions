@@ -70,6 +70,16 @@ namespace MediaLibraryEnrichment
                         }
 
                         var end = index + extension.Length;
+                        if (end < notes.Length &&
+                            (char.IsLetterOrDigit(notes[end]) ||
+                             notes[end] == '.' ||
+                             notes[end] == '_' ||
+                             notes[end] == '-'))
+                        {
+                            searchStart = end;
+                            continue;
+                        }
+
                         var prefix = notes.Substring(0, end);
                         var semicolon = prefix.LastIndexOf(';');
                         var newline = Math.Max(
