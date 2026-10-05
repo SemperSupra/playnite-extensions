@@ -34,14 +34,17 @@ namespace MediaLibraryEnrichment
             var dataPath = GetPluginUserDataPath();
             Directory.CreateDirectory(dataPath);
 
-            var candidates = CaptureCandidates();
+            var admissionEvidencePath = Path.Combine(dataPath, "admission-evidence.json");
+            var admissionEvidence =
+                MediaAdmissionEvidenceSnapshot.LoadOrEmpty(admissionEvidencePath);
+            var candidates = CaptureCandidates(admissionEvidence);
             File.WriteAllText(
                 Path.Combine(dataPath, "observation-receipt.json"),
                 Serialization.ToJson(
                     new MediaObservationReceipt
                     {
                         Schema = "sempersupra-media-library-enrichment-observation/v1",
-                        FixtureContract = "media-raw-v1",
+                        FixtureContract = "media-admission-v1",
                         CandidateCount = candidates.Length,
                         Candidates = candidates
                     },
@@ -147,23 +150,80 @@ namespace MediaLibraryEnrichment
                 Serialization.ToJson(coverReceipt, true));
         }
 
-        private MediaObservation[] CaptureCandidates()
+        private MediaObservation[] CaptureCandidates(
+            MediaAdmissionEvidenceSnapshot explicitEvidence)
         {
-            return PlayniteApi.Database.Games
-                .Where(game =>
-                    MediaCandidateClassifier.IsMediaCandidate(
-                        game.Source == null ? string.Empty : game.Source.Name))
-                .Select(game => new MediaObservation
+            var games = PlayniteApi.Database.Games.ToList();
+            var evidence = new List<MediaAdmissionEvidence>();
+
+            foreach (var game in games)
+            {
+                var adapted = HumbleMediaAdmissionAdapter.TryCreate(
+                    game.Id.ToString(),
+                    game.GameId ?? string.Empty,
+                    game.Source == null ? string.Empty : game.Source.Name);
+                if (adapted != null)
                 {
-                    PlayniteId = game.Id.ToString(),
-                    ProviderGameId = game.GameId ?? string.Empty,
-                    Name = game.Name ?? string.Empty,
-                    Source = game.Source == null ? string.Empty : game.Source.Name ?? string.Empty,
-                    Kind = MediaCandidateClassifier.ClassifyKind(game.Manual, game.Notes),
-                    LocalEvidenceName =
-                        MediaCandidateClassifier.NormalizeLocalEvidenceName(game.Manual),
-                    CoverMissing = string.IsNullOrWhiteSpace(game.CoverImage)
-                })
+                    evidence.Add(adapted);
+                }
+            }
+
+            if (explicitEvidence != null && explicitEvidence.Items != null)
+            {
+                evidence.AddRange(explicitEvidence.Items);
+            }
+
+            var uniqueEvidence = evidence
+                .Where(MediaAdmissionPolicy.IsStructurallyValid)
+                .GroupBy(
+                    item => Guid.Parse(item.PlayniteId).ToString(),
+                    StringComparer.Ordinal)
+                .Where(group => group.Count() == 1)
+                .Select(group => group.Single())
+                .OrderBy(item => Guid.Parse(item.PlayniteId).ToString(), StringComparer.Ordinal)
+                .ToList();
+
+            var candidates = new List<MediaObservation>();
+            foreach (var item in uniqueEvidence)
+            {
+                Guid gameId;
+                if (!Guid.TryParse(item.PlayniteId, out gameId))
+                {
+                    continue;
+                }
+
+                var game = PlayniteApi.Database.Games.Get(gameId);
+                if (game == null ||
+                    !MediaAdmissionPolicy.MatchesCurrentIdentity(
+                        item,
+                        game.Id.ToString(),
+                        game.GameId ?? string.Empty))
+                {
+                    continue;
+                }
+
+                candidates.Add(
+                    new MediaObservation
+                    {
+                        PlayniteId = game.Id.ToString(),
+                        ProviderGameId = game.GameId ?? string.Empty,
+                        Name = game.Name ?? string.Empty,
+                        Source = game.Source == null
+                            ? string.Empty
+                            : game.Source.Name ?? string.Empty,
+                        Kind = MediaCandidateClassifier.ClassifyKind(
+                            game.Manual,
+                            game.Notes),
+                        LocalEvidenceName =
+                            MediaCandidateClassifier.NormalizeLocalEvidenceName(
+                                game.Manual),
+                        AdmissionEvidenceKey = item.EvidenceKey ?? string.Empty,
+                        AdmissionProducerKind = item.ProducerKind ?? string.Empty,
+                        CoverMissing = string.IsNullOrWhiteSpace(game.CoverImage)
+                    });
+            }
+
+            return candidates
                 .OrderBy(item => item.PlayniteId, StringComparer.Ordinal)
                 .ToArray();
         }
