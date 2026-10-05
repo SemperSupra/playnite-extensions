@@ -4,16 +4,6 @@ namespace MediaLibraryEnrichment
 {
     public static class MediaCandidateClassifier
     {
-        public static bool IsMediaCandidate(string sourceName)
-        {
-            return IsHumbleSource(sourceName);
-        }
-
-        public static bool ShouldObserve(string sourceName, bool hasCoverImage)
-        {
-            return IsMediaCandidate(sourceName) && !hasCoverImage;
-        }
-
         public static string ClassifyKind(string manualPath, string notes)
         {
             var fromPath = ClassifyPath(manualPath);
@@ -79,12 +69,6 @@ namespace MediaLibraryEnrichment
             return string.Empty;
         }
 
-
-        private static bool IsHumbleSource(string sourceName)
-        {
-            return !string.IsNullOrWhiteSpace(sourceName) &&
-                sourceName.IndexOf("Humble", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
 
         private static string ClassifyPath(string path)
         {
@@ -160,6 +144,8 @@ namespace MediaLibraryEnrichment
         public string Source { get; set; }
         public string Kind { get; set; }
         public string LocalEvidenceName { get; set; }
+        public string AdmissionEvidenceKey { get; set; }
+        public string AdmissionProducerKind { get; set; }
         public bool CoverMissing { get; set; }
     }
 
