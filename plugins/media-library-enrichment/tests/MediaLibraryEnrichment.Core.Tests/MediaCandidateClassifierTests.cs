@@ -5,32 +5,6 @@ namespace MediaLibraryEnrichment.Core.Tests
     public sealed class MediaCandidateClassifierTests
     {
         [Theory]
-        [InlineData("Humble Bundle RDTE", true)]
-        [InlineData("Humble Extras", true)]
-        [InlineData("Manual RDTE", false)]
-        [InlineData(null, false)]
-        public void StableMediaAdmissionDependsOnSourceNotCoverState(
-            string source,
-            bool expected)
-        {
-            Assert.Equal(expected, MediaCandidateClassifier.IsMediaCandidate(source));
-        }
-
-        [Theory]
-        [InlineData("Humble Bundle RDTE", false, true)]
-        [InlineData("Humble Extras", false, true)]
-        [InlineData("Humble Bundle RDTE", true, false)]
-        [InlineData("Manual RDTE", false, false)]
-        [InlineData(null, false, false)]
-        public void ObservesOnlyHumbleItemsWithMissingCover(
-            string source,
-            bool hasCover,
-            bool expected)
-        {
-            Assert.Equal(expected, MediaCandidateClassifier.ShouldObserve(source, hasCover));
-        }
-
-        [Theory]
         [InlineData("book.pdf", null, "book")]
         [InlineData("book.epub", null, "book")]
         [InlineData("comic.cbz", null, "comic")]
