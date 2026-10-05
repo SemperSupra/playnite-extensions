@@ -80,6 +80,23 @@ namespace SemperSupraRdteSeeder
 
             if (string.Equals(
                     fixtureProfile,
+                    "r4i-user-category-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-category-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-category-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserCategoryOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
                     "r4i-conflict-apply-v1",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(
@@ -446,6 +463,122 @@ namespace SemperSupraRdteSeeder
                         filter_presets = filterPresetCount,
                         cover_images = coverCount,
                         local_files_present = localFilesPresent,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunUserCategoryOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-category-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-category-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool bookMembershipPresent = false;
+            int otherManagedMemberships = 0;
+
+            try
+            {
+                var category = PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (category == null ||
+                    !string.Equals(category.Name, EnrichmentCategoryBookName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected managed Book category is unavailable or renamed.");
+                }
+                if (game == null)
+                {
+                    throw new InvalidOperationException("Humble Ebook fixture is unavailable.");
+                }
+
+                var categories = game.CategoryIds == null
+                    ? new List<Guid>()
+                    : new List<Guid>(game.CategoryIds);
+
+                if (remove)
+                {
+                    if (!categories.Contains(EnrichmentCategoryBook))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Book membership is absent before user-override injection.");
+                    }
+                    categories.Remove(EnrichmentCategoryBook);
+                    game.CategoryIds = categories;
+                    PlayniteApi.Database.Games.Update(game);
+                }
+                else if (restore && !categories.Contains(EnrichmentCategoryBook))
+                {
+                    categories.Add(EnrichmentCategoryBook);
+                    game.CategoryIds = categories;
+                    PlayniteApi.Database.Games.Update(game);
+                }
+
+                var verifiedBook = PlayniteApi.Database.Games.Get(GameBook);
+                bookMembershipPresent =
+                    verifiedBook != null &&
+                    verifiedBook.CategoryIds != null &&
+                    verifiedBook.CategoryIds.Contains(EnrichmentCategoryBook);
+
+                var comic = PlayniteApi.Database.Games.Get(GameComic);
+                var audio = PlayniteApi.Database.Games.Get(GameAudio);
+                var manualMedia = PlayniteApi.Database.Games.Get(GameManualMedia);
+                if (comic != null && comic.CategoryIds != null &&
+                    comic.CategoryIds.Contains(EnrichmentCategoryComic)) otherManagedMemberships++;
+                if (audio != null && audio.CategoryIds != null &&
+                    audio.CategoryIds.Contains(EnrichmentCategoryAudio)) otherManagedMemberships++;
+                if (manualMedia != null && manualMedia.CategoryIds != null &&
+                    manualMedia.CategoryIds.Contains(EnrichmentCategoryBook)) otherManagedMemberships++;
+
+                var expectedBookMembership = restore;
+                if (bookMembershipPresent != expectedBookMembership)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Book membership was not restored for fixture cleanup."
+                            : "User-removed Book membership was reasserted.");
+                }
+                if (otherManagedMemberships != 3)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed category memberships changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Book membership removed through Playnite SDK."
+                    : restore
+                        ? "Managed Book membership restored for fixture cleanup."
+                        : "User-removed Book membership remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-category-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-category-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        category_id = EnrichmentCategoryBook.ToString(),
+                        category_name = EnrichmentCategoryBookName,
+                        book_membership_present = bookMembershipPresent,
+                        other_managed_memberships = otherManagedMemberships,
                         detail = detail
                     },
                     true));
