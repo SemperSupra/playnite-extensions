@@ -172,7 +172,7 @@ function Wait-ForPlayniteStarted {
         }
         if (Test-Path $LogPath) {
             $text = Get-Content $LogPath -Raw
-            if ($text.Contains($marker)) {
+            if ($null -ne $text -and $text.Contains($marker)) {
                 return $marker
             }
         }
