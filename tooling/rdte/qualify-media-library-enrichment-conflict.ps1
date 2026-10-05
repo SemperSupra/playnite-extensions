@@ -177,12 +177,12 @@ function Assert-Reapply {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "apply" -or
-        $value.CandidateCount -ne 3 -or
-        $value.AppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.AppliedCount -ne 4 -or
         $value.NoopCount -ne 0 -or
         $value.ConflictCount -ne 0 -or
-        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 3) {
-        throw "R4I re-apply did not reproduce three clean owned mutations."
+        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 4) {
+        throw "R4I re-apply did not reproduce four clean owned mutations."
     }
     return $value
 }
@@ -206,14 +206,14 @@ function Assert-ConflictRollback {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "rollback" -or
-        $value.CandidateCount -ne 3 -or
-        $value.RollbackAppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.RollbackAppliedCount -ne 4 -or
         $value.ConflictCount -ne 1) {
-        throw "Conflict rollback did not prove three owned reversions plus one preserved external conflict."
+        throw "Conflict rollback did not prove four owned reversions plus one preserved external conflict."
     }
 
-    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
-        throw "Conflict rollback did not remove exactly three owned memberships."
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 4) {
+        throw "Conflict rollback did not remove exactly four owned memberships."
     }
 
     if (@($value.Operations | Where-Object Outcome -eq "CATEGORY_REMOVED").Count -ne 2) {
@@ -239,12 +239,12 @@ function Assert-ActionReapply {
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Schema -ne "sempersupra-media-library-enrichment-action-r4i/v1" -or
         $value.Mode -ne "apply" -or
-        $value.CandidateCount -ne 3 -or
-        $value.AppliedCount -ne 3 -or
+        $value.CandidateCount -ne 4 -or
+        $value.AppliedCount -ne 4 -or
         $value.NoopCount -ne 0 -or
         $value.ConflictCount -ne 0 -or
-        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 3) {
-        throw "Action re-apply did not reproduce three clean custom actions."
+        @($value.Operations | Where-Object Outcome -eq "APPLIED").Count -ne 4) {
+        throw "Action re-apply did not reproduce four clean custom actions."
     }
 
     if (@($value.Operations | Where-Object IsPlayAction -eq $true).Count -ne 0) {
@@ -279,14 +279,14 @@ function Assert-ActionConflictRollback {
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
     if ($value.Mode -ne "rollback" -or
-        $value.CandidateCount -ne 3 -or
-        $value.RollbackAppliedCount -ne 2 -or
+        $value.CandidateCount -ne 4 -or
+        $value.RollbackAppliedCount -ne 3 -or
         $value.ConflictCount -ne 1) {
-        throw "Action conflict rollback did not prove two owned removals plus one preserved external mutation."
+        throw "Action conflict rollback did not prove three owned removals plus one preserved external mutation."
     }
 
-    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 2) {
-        throw "Action conflict rollback did not remove exactly two still-owned actions."
+    if (@($value.Operations | Where-Object Outcome -eq "ROLLBACK_APPLIED").Count -ne 3) {
+        throw "Action conflict rollback did not remove exactly three still-owned actions."
     }
 
     $preserved = @($value.Operations | Where-Object Outcome -eq "CONFLICT_ACTION_CHANGED")
@@ -862,6 +862,7 @@ try {
     $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
     foreach ($name in @(
         "settings.json",
+        "admission-evidence.json",
         "observation-receipt.json",
         "r4i-receipt.json",
         "category-ledger.json",
