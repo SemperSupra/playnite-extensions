@@ -62,6 +62,16 @@ namespace MediaLibraryEnrichment.Core.Tests
                     "fixture: C:\\media\\cover.png"));
         }
 
+        [Fact]
+        public void LocalVariantInventoryDoesNotSplitLongerExtensions()
+        {
+            Assert.Equal(
+                new[] { "book.azw3" },
+                MediaCandidateClassifier.CollectLocalEvidenceNames(
+                    null,
+                    @"variant: C:\\media\\book.azw3"));
+        }
+
         [Theory]
         [InlineData(@"C:\\media\\book.pdf", null, @"C:\\media\\book.pdf")]
         [InlineData(null, @"RDTE audio fixture: C:\\media\\track.flac", @"C:\\media\\track.flac")]
