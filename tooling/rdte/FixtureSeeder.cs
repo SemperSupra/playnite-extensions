@@ -33,8 +33,9 @@ namespace SemperSupraRdteSeeder
         private static readonly Guid GameComic = Guid.Parse("73000000-0000-4000-8000-000000000002");
         private static readonly Guid GameAudio = Guid.Parse("73000000-0000-4000-8000-000000000003");
         private static readonly Guid GameManual = Guid.Parse("73000000-0000-4000-8000-000000000004");
+        private static readonly Guid GameManualMedia = Guid.Parse("73000000-0000-4000-8000-000000000005");
 
-        private static readonly Guid[] FixtureGameIds = { GameBook, GameComic, GameAudio, GameManual };
+        private static readonly Guid[] FixtureGameIds = { GameBook, GameComic, GameAudio, GameManual, GameManualMedia };
 
         public SemperSupraRdteSeeder(IPlayniteAPI api) : base(api)
         {
@@ -192,6 +193,19 @@ namespace SemperSupraRdteSeeder
                     OverrideInstallState = true,
                     Manual = pdfPath,
                     Notes = "RDTE ordinary game/manual control fixture"
+                });
+
+                UpsertGame(new Game("RDTE Manual Media Book")
+                {
+                    Id = GameManualMedia,
+                    GameId = "rdte-manual-media-book",
+                    SourceId = SourceManual,
+                    IsInstalled = true,
+                    OverrideInstallState = true,
+                    InstallDirectory = fixturePath,
+                    Manual = pdfPath,
+                    CoverImage = null,
+                    Notes = "RDTE explicit admission media fixture: " + pdfPath
                 });
             }
 
