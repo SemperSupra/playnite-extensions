@@ -10,6 +10,7 @@ namespace MediaLibraryEnrichment.Core.Tests
         [InlineData("comic.cbz", null, "comic")]
         [InlineData(null, "fixture: soundtrack.flac", "audio")]
         [InlineData(null, "nothing useful", "unresolved")]
+        [InlineData(null, @"fixture: C:\\media\\fake.pdfx", "unresolved")]
         public void ClassifiesConservativelyFromLocalEvidence(
             string manualPath,
             string notes,
@@ -75,6 +76,8 @@ namespace MediaLibraryEnrichment.Core.Tests
         [Theory]
         [InlineData(@"C:\\media\\book.pdf", null, @"C:\\media\\book.pdf")]
         [InlineData(null, @"RDTE audio fixture: C:\\media\\track.flac", @"C:\\media\\track.flac")]
+        [InlineData(null, @"fixture: C:\\media\\book.azw3", @"C:\\media\\book.azw3")]
+        [InlineData(null, @"fixture: C:\\media\\fake.pdfx", "")]
         [InlineData(null, "nothing useful", "")]
         public void ResolvesStableLocalEvidencePath(
             string manualPath,
