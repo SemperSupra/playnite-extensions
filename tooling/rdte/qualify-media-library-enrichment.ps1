@@ -73,7 +73,7 @@ function Wait-ForText {
         }
         if (Test-Path $Path) {
             $content = Get-Content $Path -Raw
-            if ($content.Contains($Text)) { return }
+            if ($null -ne $content -and $content.Contains($Text)) { return }
         }
         Start-Sleep -Milliseconds 250
     }
