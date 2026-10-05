@@ -44,7 +44,7 @@ namespace MediaLibraryEnrichment
                     new MediaObservationReceipt
                     {
                         Schema = "sempersupra-media-library-enrichment-observation/v1",
-                        FixtureContract = "media-admission-v1",
+                        FixtureContract = "media-admission-variants-v1",
                         CandidateCount = candidates.Length,
                         Candidates = candidates
                     },
@@ -217,6 +217,10 @@ namespace MediaLibraryEnrichment
                         LocalEvidenceName =
                             MediaCandidateClassifier.NormalizeLocalEvidenceName(
                                 game.Manual),
+                        LocalEvidenceNames =
+                            MediaCandidateClassifier.CollectLocalEvidenceNames(
+                                game.Manual,
+                                game.Notes),
                         AdmissionEvidenceKey = item.EvidenceKey ?? string.Empty,
                         AdmissionProducerKind = item.ProducerKind ?? string.Empty,
                         CoverMissing = string.IsNullOrWhiteSpace(game.CoverImage)
