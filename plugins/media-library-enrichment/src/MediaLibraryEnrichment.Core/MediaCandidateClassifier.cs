@@ -4,9 +4,14 @@ namespace MediaLibraryEnrichment
 {
     public static class MediaCandidateClassifier
     {
+        public static bool IsMediaCandidate(string sourceName)
+        {
+            return IsHumbleSource(sourceName);
+        }
+
         public static bool ShouldObserve(string sourceName, bool hasCoverImage)
         {
-            return IsHumbleSource(sourceName) && !hasCoverImage;
+            return IsMediaCandidate(sourceName) && !hasCoverImage;
         }
 
         public static string ClassifyKind(string manualPath, string notes)

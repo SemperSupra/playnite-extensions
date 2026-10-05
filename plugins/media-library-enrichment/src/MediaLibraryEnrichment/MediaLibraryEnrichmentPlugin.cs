@@ -151,9 +151,8 @@ namespace MediaLibraryEnrichment
         {
             return PlayniteApi.Database.Games
                 .Where(game =>
-                    MediaCandidateClassifier.ShouldObserve(
-                        game.Source == null ? string.Empty : game.Source.Name,
-                        !string.IsNullOrWhiteSpace(game.CoverImage)))
+                    MediaCandidateClassifier.IsMediaCandidate(
+                        game.Source == null ? string.Empty : game.Source.Name))
                 .Select(game => new MediaObservation
                 {
                     PlayniteId = game.Id.ToString(),
