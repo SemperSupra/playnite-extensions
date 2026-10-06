@@ -580,6 +580,43 @@ function Assert-UserCategoryOverrideReceipt {
     return $value
 }
 
+function Assert-UserCategoryOverrideReconcile {
+    param(
+        [string]$ReceiptPath,
+        [string]$LedgerPath
+    )
+
+    $reconcile = Get-Content $ReceiptPath -Raw | ConvertFrom-Json
+    $overrideOperations = @($reconcile.Operations | Where-Object Outcome -eq "USER_OVERRIDE")
+    $bookOverride = @($overrideOperations | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000001" -and
+        $_.CategoryName -eq $bookCategoryName
+    })
+
+    if ($reconcile.Mode -ne "apply" -or
+        $reconcile.CandidateCount -ne 4 -or
+        $reconcile.AppliedCount -ne 0 -or
+        $reconcile.NoopCount -ne 3 -or
+        $reconcile.UserOverrideCount -ne 1 -or
+        $reconcile.ConflictCount -ne 0 -or
+        $overrideOperations.Count -ne 1 -or
+        $bookOverride.Count -ne 1) {
+        throw "Product reconcile did not surface exactly one Book USER_OVERRIDE while leaving the other three memberships as NOOP."
+    }
+
+    $ledger = Get-Content $LedgerPath -Raw | ConvertFrom-Json
+    $overrideLedger = @($ledger.Entries | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000001" -and
+        $_.CategoryName -eq $bookCategoryName -and
+        $_.Status -eq "USER_OVERRIDDEN"
+    })
+    if ($overrideLedger.Count -ne 1) {
+        throw "Category ownership ledger did not persist USER_OVERRIDDEN for the externally removed Book membership."
+    }
+
+    return $reconcile
+}
+
 $receipt = [ordered]@{
     schema = "sempersupra-media-library-enrichment-r4i-conflict-rdte/v1"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } else { $env:GITHUB_SHA }
@@ -777,9 +814,11 @@ try {
     $productProcess = Start-Playnite
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
     Wait-ForFile -Path $r4iPath -Process $productProcess
+    $userOverrideReconcile = Assert-UserCategoryOverrideReconcile -ReceiptPath $r4iPath -LedgerPath $categoryLedgerPath
     Copy-Item $r4iPath (Join-Path $EvidenceDir "user-category-override-reconcile.json") -Force
+    Copy-Item $categoryLedgerPath (Join-Path $EvidenceDir "category-ledger-after-user-override.json") -Force
     $receipt.user_category_override_reconcile_plan_sha256 =
-        (Get-Content $r4iPath -Raw | ConvertFrom-Json).PlanSha256
+        $userOverrideReconcile.PlanSha256
     $receipt.phases.user_category_override_reconcile = "PASS"
     Stop-Playnite
     $productProcess = $null
