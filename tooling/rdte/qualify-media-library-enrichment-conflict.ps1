@@ -25,6 +25,8 @@ $metadataUtilitiesId = "MetadataUtilities_485ab5f0-bfb1-4c17-93cc-20d8338673be"
 $metadataUtilitiesName = "Metadata Utilities"
 $metadataUtilitiesVersion = "1.9.0"
 $metadataUtilitiesSha256 = "8b5c3ce5b5aeb3eb1d476083f36aaa5fa58498d3f366666b7ddc56cc40400cf8"
+$metadataUtilitiesDataId = "485ab5f0-bfb1-4c17-93cc-20d8338673be"
+$metadataUtilitiesExternalCategoryName = "RDTE.MetadataUtilities.External"
 
 $userData = Join-Path $WorkRoot "userdata"
 $runtimeDir = Join-Path $WorkRoot "runtime"
@@ -177,6 +179,67 @@ function Set-ProductMode {
     [ordered]@{ Mode = $Mode } |
         ConvertTo-Json -Depth 4 |
         Set-Content -Path (Join-Path $pluginData "settings.json") -Encoding UTF8
+}
+
+function Set-MetadataUtilitiesCategoryAction {
+    param([bool]$Enabled)
+
+    $dataPath = Join-Path $userData "ExtensionsData\$metadataUtilitiesDataId"
+    New-Item $dataPath -ItemType Directory -Force | Out-Null
+    $configPath = Join-Path $dataPath "config.json"
+
+    $conditionalActions = @()
+    if ($Enabled) {
+        $conditionalActions = @(
+            [ordered]@{
+                Actions = @(
+                    [ordered]@{
+                        ActionType = 0
+                        Name = $metadataUtilitiesExternalCategoryName
+                        Type = 0
+                    }
+                )
+                CanBeExecutedManually = $false
+                Conditions = @()
+                Enabled = $true
+                ExecuteOnNewBeforeMetadata = $false
+                FalseActions = @()
+                IgnoreConditionOnManual = $false
+                Name = "RDTE MLE coexistence external category"
+                SortNo = 0
+                Type = 0
+            }
+        )
+    }
+
+    [ordered]@{
+        ConditionalActions = $conditionalActions
+        MergeMetadataOnMetadataUpdate = $false
+        RemoveUnwantedOnMetadataUpdate = $false
+        ShowTopPanelButton = $false
+        ShowTopPanelSettingsButton = $false
+        ShowUserScoreMenu = $false
+        WriteDebugLog = $true
+    } |
+        ConvertTo-Json -Depth 12 |
+        Set-Content -Path $configPath -Encoding UTF8
+}
+
+function Assert-MetadataUtilitiesCoexistenceReceipt {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.schema -ne "sempersupra-playnite-metadata-utilities-coexistence-fixture/v1" -or
+        $value.result -ne "PASS" -or
+        $value.category_name -ne $metadataUtilitiesExternalCategoryName -or
+        $value.expected_media_memberships -ne 4 -or
+        $value.observed_media_memberships -ne 4 -or
+        $value.ordinary_manual_membership -ne $false -or
+        [string]::IsNullOrWhiteSpace($value.category_id)) {
+        throw "Metadata Utilities did not produce or preserve the expected external category mutation."
+    }
+
+    return $value
 }
 
 function Assert-Reapply {
@@ -910,6 +973,8 @@ try {
     $receipt.phases.metadata_utilities_install = "PASS"
     Stop-Playnite
     $metadataInstall = $null
+    Set-MetadataUtilitiesCategoryAction -Enabled $true
+    $receipt.phases.metadata_utilities_action_configured = "PASS"
 
     $seederData = Join-Path $userData "ExtensionsData\$seederDataId"
     New-Item $seederData -ItemType Directory -Force | Out-Null
@@ -937,6 +1002,26 @@ try {
 
     Stop-Playnite
     $productProcess = $null
+
+    Set-ProductMode -Mode "observe"
+    $metadataUtilitiesMutationPath =
+        Join-Path $seederData "metadata-utilities-coexistence-receipt.json"
+    Set-Content -Path $profilePath -Value "metadata-utilities-coexistence-verify-v1" -Encoding UTF8
+    if (Test-Path $metadataUtilitiesMutationPath) {
+        Remove-Item $metadataUtilitiesMutationPath -Force
+    }
+    $metadataMutationSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $metadataUtilitiesMutationPath
+    $metadataUtilitiesMutation =
+        Assert-MetadataUtilitiesCoexistenceReceipt -Path $metadataUtilitiesMutationPath
+    Copy-Item $metadataUtilitiesMutationPath (Join-Path $EvidenceDir "metadata-utilities-external-category-created.json") -Force
+    $receipt.metadata_utilities_external_category_id =
+        $metadataUtilitiesMutation.category_id
+    $receipt.phases.metadata_utilities_mutation = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $metadataMutationSeeder.InstalledDir
+
+    Set-MetadataUtilitiesCategoryAction -Enabled $false
+    $receipt.phases.metadata_utilities_reassertion_disabled = "PASS"
 
     # Release gate: native enrichment must remain useful after product uninstall
     # when rollback was not requested.
@@ -1511,14 +1596,19 @@ try {
     if (-not $metadataUtilitiesInstalledDir) {
         throw "Metadata Utilities did not survive Media Library Enrichment uninstall."
     }
-    if (Test-Path $logPath) {
-        Remove-Item $logPath -Force
+
+    Set-Content -Path $profilePath -Value "metadata-utilities-coexistence-verify-v1" -Encoding UTF8
+    if (Test-Path $metadataUtilitiesMutationPath) {
+        Remove-Item $metadataUtilitiesMutationPath -Force
     }
-    $metadataVerifyProcess = Start-Playnite
-    Wait-ForText -Path $logPath -Text "Loaded plugin: $metadataUtilitiesName, version $metadataUtilitiesVersion" -Process $metadataVerifyProcess
+    $metadataPersistenceSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $metadataUtilitiesMutationPath
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $metadataUtilitiesName, version $metadataUtilitiesVersion" -Process $metadataPersistenceSeeder.Process
+    Assert-MetadataUtilitiesCoexistenceReceipt -Path $metadataUtilitiesMutationPath | Out-Null
+    Copy-Item $metadataUtilitiesMutationPath (Join-Path $EvidenceDir "metadata-utilities-external-category-after-mle-uninstall.json") -Force
     $receipt.phases.metadata_utilities_survives_product_uninstall = "PASS"
+    $receipt.phases.metadata_utilities_mutation_persisted = "PASS"
     Stop-Playnite
-    $metadataVerifyProcess = $null
+    Native-Uninstall -InstalledDir $metadataPersistenceSeeder.InstalledDir
 
     Native-Uninstall -InstalledDir $metadataUtilitiesInstalledDir
     $metadataUtilitiesInstalledDir = $null
