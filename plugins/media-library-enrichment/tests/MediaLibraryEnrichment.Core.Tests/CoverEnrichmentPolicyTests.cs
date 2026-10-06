@@ -5,14 +5,43 @@ namespace MediaLibraryEnrichment.Core.Tests
     public sealed class CoverEnrichmentPolicyTests
     {
         [Fact]
-        public void AddsOnlyWhenEvidenceIsValidAndCoverIsMissing()
+        public void AddsOnlyWhenEvidenceIsValidAndCoverWasNotPreviouslyCommitted()
         {
             Assert.Equal(
                 CoverPlanDecision.Add,
                 CoverEnrichmentPolicy.Decide(
                     evidenceValid: true,
                     hasCurrentCover: false,
-                    currentMatchesOwnedCover: false));
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: null));
+
+            Assert.Equal(
+                CoverPlanDecision.Add,
+                CoverEnrichmentPolicy.Decide(
+                    evidenceValid: true,
+                    hasCurrentCover: false,
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "ROLLED_BACK"));
+        }
+
+        [Fact]
+        public void MissingPreviouslyCommittedCoverIsUserOverride()
+        {
+            Assert.Equal(
+                CoverPlanDecision.UserOverride,
+                CoverEnrichmentPolicy.Decide(
+                    evidenceValid: true,
+                    hasCurrentCover: false,
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "COMMITTED"));
+
+            Assert.Equal(
+                CoverPlanDecision.UserOverride,
+                CoverEnrichmentPolicy.Decide(
+                    evidenceValid: true,
+                    hasCurrentCover: false,
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "USER_OVERRIDDEN"));
         }
 
         [Fact]
@@ -23,7 +52,8 @@ namespace MediaLibraryEnrichment.Core.Tests
                 CoverEnrichmentPolicy.Decide(
                     evidenceValid: true,
                     hasCurrentCover: true,
-                    currentMatchesOwnedCover: true));
+                    currentMatchesOwnedCover: true,
+                    ledgerStatus: "COMMITTED"));
         }
 
         [Fact]
@@ -34,7 +64,8 @@ namespace MediaLibraryEnrichment.Core.Tests
                 CoverEnrichmentPolicy.Decide(
                     evidenceValid: true,
                     hasCurrentCover: true,
-                    currentMatchesOwnedCover: false));
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "COMMITTED"));
         }
 
         [Fact]
@@ -45,7 +76,28 @@ namespace MediaLibraryEnrichment.Core.Tests
                 CoverEnrichmentPolicy.Decide(
                     evidenceValid: false,
                     hasCurrentCover: false,
-                    currentMatchesOwnedCover: false));
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "COMMITTED"));
+        }
+
+        [Fact]
+        public void PlannedAndApplyingStateRemainRetryable()
+        {
+            Assert.Equal(
+                CoverPlanDecision.Add,
+                CoverEnrichmentPolicy.Decide(
+                    evidenceValid: true,
+                    hasCurrentCover: false,
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "PLANNED"));
+
+            Assert.Equal(
+                CoverPlanDecision.Add,
+                CoverEnrichmentPolicy.Decide(
+                    evidenceValid: true,
+                    hasCurrentCover: false,
+                    currentMatchesOwnedCover: false,
+                    ledgerStatus: "APPLYING"));
         }
     }
 }
