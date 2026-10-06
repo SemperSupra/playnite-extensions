@@ -199,7 +199,14 @@ try {
         $target
     ) -PassThru -Wait
     if ($fileRun.ExitCode -ne 0) {
-        throw "Playnite ProcessStarter file probe returned $($fileRun.ExitCode)."
+        $errorPath = Join-Path $playniteHome "open-target-invocation-error.txt"
+        $errorDetail = if (Test-Path -LiteralPath $errorPath) {
+            (Get-Content -LiteralPath $errorPath -Raw).Trim()
+        }
+        else {
+            "No invocation error receipt was produced."
+        }
+        throw "Playnite ProcessStarter file probe returned $($fileRun.ExitCode): $errorDetail"
     }
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -223,7 +230,14 @@ try {
         $uriTarget
     ) -PassThru -Wait
     if ($uriRun.ExitCode -ne 0) {
-        throw "Playnite ProcessStarter URI probe returned $($uriRun.ExitCode)."
+        $errorPath = Join-Path $playniteHome "open-target-invocation-error.txt"
+        $errorDetail = if (Test-Path -LiteralPath $errorPath) {
+            (Get-Content -LiteralPath $errorPath -Raw).Trim()
+        }
+        else {
+            "No invocation error receipt was produced."
+        }
+        throw "Playnite ProcessStarter URI probe returned $($uriRun.ExitCode): $errorDetail"
     }
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
