@@ -7,6 +7,14 @@ namespace MediaLibraryEnrichment
         public string ActionName { get; set; }
     }
 
+    public enum ActionPresenceDecision
+    {
+        Noop,
+        Conflict,
+        AddAction,
+        UserOverride
+    }
+
     public static class ActionEnrichmentPolicy
     {
         private static readonly ActionEnrichmentSpec Book = new ActionEnrichmentSpec
@@ -29,6 +37,36 @@ namespace MediaLibraryEnrichment
             SemanticKey = "media-open-audio",
             ActionName = "Listen"
         };
+
+        public static ActionPresenceDecision DecidePresence(
+            bool desiredPresent,
+            bool sameNameConflict,
+            string ledgerStatus)
+        {
+            if (desiredPresent)
+            {
+                return ActionPresenceDecision.Noop;
+            }
+
+            if (sameNameConflict)
+            {
+                return ActionPresenceDecision.Conflict;
+            }
+
+            if (string.Equals(
+                    ledgerStatus,
+                    "COMMITTED",
+                    System.StringComparison.Ordinal) ||
+                string.Equals(
+                    ledgerStatus,
+                    "USER_OVERRIDDEN",
+                    System.StringComparison.Ordinal))
+            {
+                return ActionPresenceDecision.UserOverride;
+            }
+
+            return ActionPresenceDecision.AddAction;
+        }
 
         public static ActionEnrichmentSpec ForKind(string kind)
         {

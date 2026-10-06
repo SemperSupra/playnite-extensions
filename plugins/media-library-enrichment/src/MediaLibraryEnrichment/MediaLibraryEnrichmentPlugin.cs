@@ -685,7 +685,7 @@ namespace MediaLibraryEnrichment
             ActionLedger ledger,
             string ledgerPath)
         {
-            var operations = BuildActionApplyPlan(candidates);
+            var operations = BuildActionApplyPlan(candidates, ledger);
             var receipt = new ActionReconcileReceipt
             {
                 Mode = "apply",
@@ -700,6 +700,25 @@ namespace MediaLibraryEnrichment
                 {
                     receipt.NoopCount++;
                     CommitRecoveredActionLedgerIfNeeded(operation, ledger, ledgerPath);
+                    continue;
+                }
+
+                if (string.Equals(operation.Outcome, "USER_OVERRIDE", StringComparison.Ordinal))
+                {
+                    receipt.UserOverrideCount++;
+                    var overrideEntry = FindActionLedgerEntry(
+                        ledger,
+                        operation.PlayniteId,
+                        operation.SemanticKey);
+                    if (overrideEntry != null &&
+                        !string.Equals(
+                            overrideEntry.Status,
+                            "USER_OVERRIDDEN",
+                            StringComparison.Ordinal))
+                    {
+                        overrideEntry.Status = "USER_OVERRIDDEN";
+                        ledger.Save(ledgerPath);
+                    }
                     continue;
                 }
 
@@ -824,7 +843,8 @@ namespace MediaLibraryEnrichment
         }
 
         private List<ActionOperationReceipt> BuildActionApplyPlan(
-            MediaObservation[] candidates)
+            MediaObservation[] candidates,
+            ActionLedger ledger)
         {
             var operations = new List<ActionOperationReceipt>();
 
@@ -871,16 +891,34 @@ namespace MediaLibraryEnrichment
                     MediaCandidateClassifier.NormalizeLocalEvidenceName(evidencePath);
 
                 var actions = game.GameActions ?? new ObservableCollection<GameAction>();
-                if (actions.Any(action => ActionMatchesDesired(action, spec, evidencePath)))
+                var desiredPresent = actions.Any(action =>
+                    ActionMatchesDesired(action, spec, evidencePath));
+                var sameNameConflict = !desiredPresent && actions.Any(action =>
+                    string.Equals(action.Name, spec.ActionName, StringComparison.Ordinal));
+                var ledgerEntry = FindActionLedgerEntry(
+                    ledger,
+                    candidate.PlayniteId,
+                    spec.SemanticKey);
+                var decision = ActionEnrichmentPolicy.DecidePresence(
+                    desiredPresent,
+                    sameNameConflict,
+                    ledgerEntry == null ? null : ledgerEntry.Status);
+
+                if (decision == ActionPresenceDecision.Noop)
                 {
                     operation.Outcome = "NOOP";
                     operation.Detail = "Desired custom action already exists.";
                 }
-                else if (actions.Any(action =>
-                    string.Equals(action.Name, spec.ActionName, StringComparison.Ordinal)))
+                else if (decision == ActionPresenceDecision.Conflict)
                 {
                     operation.Outcome = "CONFLICT_ACTION_NAME";
                     operation.Detail = "Same-name action exists with different state.";
+                }
+                else if (decision == ActionPresenceDecision.UserOverride)
+                {
+                    operation.Outcome = "USER_OVERRIDE";
+                    operation.Detail =
+                        "Previously managed custom action is absent outside plugin rollback; preserve the external/user override.";
                 }
                 else
                 {

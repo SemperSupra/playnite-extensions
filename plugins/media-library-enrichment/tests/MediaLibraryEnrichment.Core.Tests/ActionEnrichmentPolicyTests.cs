@@ -25,5 +25,49 @@ namespace MediaLibraryEnrichment.Core.Tests
         {
             Assert.Null(ActionEnrichmentPolicy.ForKind("video"));
         }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("PLANNED")]
+        [InlineData("ROLLED_BACK")]
+        public void MissingActionWithoutCommittedOwnershipIsAddable(string status)
+        {
+            Assert.Equal(
+                ActionPresenceDecision.AddAction,
+                ActionEnrichmentPolicy.DecidePresence(false, false, status));
+        }
+
+        [Theory]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void MissingPreviouslyCommittedActionIsAUserOverride(string status)
+        {
+            Assert.Equal(
+                ActionPresenceDecision.UserOverride,
+                ActionEnrichmentPolicy.DecidePresence(false, false, status));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void ExistingDesiredActionIsAlwaysANoop(string status)
+        {
+            Assert.Equal(
+                ActionPresenceDecision.Noop,
+                ActionEnrichmentPolicy.DecidePresence(true, false, status));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void SameNameChangedActionRemainsAConflict(string status)
+        {
+            Assert.Equal(
+                ActionPresenceDecision.Conflict,
+                ActionEnrichmentPolicy.DecidePresence(false, true, status));
+        }
     }
 }

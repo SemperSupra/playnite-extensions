@@ -601,6 +601,49 @@ function Assert-UserActionOverrideReceipt {
     return $value
 }
 
+function Assert-UserActionOverrideReconcile {
+    param(
+        [string]$ReceiptPath,
+        [string]$LedgerPath
+    )
+
+    $reconcile = Get-Content $ReceiptPath -Raw | ConvertFrom-Json
+    $overrideOperations = @($reconcile.Operations | Where-Object Outcome -eq "USER_OVERRIDE")
+    $bookOverride = @($overrideOperations | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000001" -and
+        $_.SemanticKey -eq "media-open-book" -and
+        $_.ActionName -eq "Read"
+    })
+
+    if ($reconcile.Mode -ne "apply" -or
+        $reconcile.CandidateCount -ne 4 -or
+        $reconcile.AppliedCount -ne 0 -or
+        $reconcile.NoopCount -ne 3 -or
+        $reconcile.UserOverrideCount -ne 1 -or
+        $reconcile.ConflictCount -ne 0 -or
+        $overrideOperations.Count -ne 1 -or
+        $bookOverride.Count -ne 1) {
+        throw "Product reconcile did not surface exactly one Ebook Read USER_OVERRIDE while leaving the other three managed actions as NOOP."
+    }
+
+    $ledger = Get-Content $LedgerPath -Raw | ConvertFrom-Json
+    $overrideLedger = @($ledger.Entries | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000001" -and
+        $_.SemanticKey -eq "media-open-book" -and
+        $_.ActionName -eq "Read" -and
+        $_.Status -eq "USER_OVERRIDDEN"
+    })
+    $stillManaged = @($ledger.Entries | Where-Object {
+        $_.Status -eq "COMMITTED" -and
+        $_.PlayniteId -ne "73000000-0000-4000-8000-000000000001"
+    })
+    if ($overrideLedger.Count -ne 1 -or $stillManaged.Count -ne 3) {
+        throw "Action ownership ledger did not persist one USER_OVERRIDDEN Ebook Read entry while leaving the other three actions COMMITTED."
+    }
+
+    return $reconcile
+}
+
 function Assert-UserCategoryOverrideReconcile {
     param(
         [string]$ReceiptPath,
@@ -890,10 +933,11 @@ try {
     $productProcess = Start-Playnite
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
     Wait-ForFile -Path $actionR4iPath -Process $productProcess
+    $userActionOverrideReconcile = Assert-UserActionOverrideReconcile -ReceiptPath $actionR4iPath -LedgerPath $actionLedgerPath
     Copy-Item $actionR4iPath (Join-Path $EvidenceDir "user-action-override-reconcile.json") -Force
     Copy-Item $actionLedgerPath (Join-Path $EvidenceDir "action-ledger-after-user-override-reconcile.json") -Force
     $receipt.user_action_override_reconcile_plan_sha256 =
-        (Get-Content $actionR4iPath -Raw | ConvertFrom-Json).PlanSha256
+        $userActionOverrideReconcile.PlanSha256
     $receipt.phases.user_action_override_reconcile = "PASS"
     Stop-Playnite
     $productProcess = $null
