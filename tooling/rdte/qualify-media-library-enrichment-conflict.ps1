@@ -580,6 +580,27 @@ function Assert-UserCategoryOverrideReceipt {
     return $value
 }
 
+function Assert-UserActionOverrideReceipt {
+    param(
+        [string]$Path,
+        [ValidateSet("remove", "verify", "restore")][string]$ExpectedMode
+    )
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    $expectedAction = $ExpectedMode -eq "restore"
+    if ($value.schema -ne "sempersupra-playnite-user-action-override-fixture/v1" -or
+        $value.mode -ne $ExpectedMode -or
+        $value.result -ne "PASS" -or
+        $value.book_game_id -ne "73000000-0000-4000-8000-000000000001" -or
+        $value.action_name -ne "Read" -or
+        $value.book_action_present -ne $expectedAction -or
+        $value.other_managed_actions -ne 3) {
+        throw "Fixture seeder did not prove '$ExpectedMode' user-action override state."
+    }
+
+    return $value
+}
+
 function Assert-UserCategoryOverrideReconcile {
     param(
         [string]$ReceiptPath,
@@ -632,6 +653,10 @@ $receipt = [ordered]@{
         user_category_override_reconcile = "NOT_RUN"
         user_category_override_verify = "NOT_RUN"
         user_category_override_restore = "NOT_RUN"
+        user_action_override_remove = "NOT_RUN"
+        user_action_override_reconcile = "NOT_RUN"
+        user_action_override_verify = "NOT_RUN"
+        user_action_override_restore = "NOT_RUN"
         external_conflict_inject = "NOT_RUN"
         conflict_rollback = "NOT_RUN"
         external_conflict_verify = "NOT_RUN"
@@ -841,6 +866,56 @@ try {
     Stop-Playnite
     Native-Uninstall -InstalledDir $userOverrideRestoreSeeder.InstalledDir
     Copy-Item $categoryLedgerBackup $categoryLedgerPath -Force
+
+    # Continue release gate #4 falsification with the smallest next owned
+    # native object: complete external deletion of the managed Ebook Read action.
+    $actionLedgerPath = Join-Path $userData "ExtensionsData\$pluginId\action-ledger.json"
+    $actionLedgerBackup = Join-Path $EvidenceDir "action-ledger-before-user-override.json"
+    Copy-Item $actionLedgerPath $actionLedgerBackup -Force
+
+    Set-ProductMode -Mode "observe"
+    $userActionOverridePath = Join-Path $seederData "user-action-override-receipt.json"
+    Set-Content -Path $profilePath -Value "r4i-user-action-override-remove-v1" -Encoding UTF8
+    if (Test-Path $userActionOverridePath) { Remove-Item $userActionOverridePath -Force }
+    $userActionOverrideSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userActionOverridePath
+    Assert-UserActionOverrideReceipt -Path $userActionOverridePath -ExpectedMode "remove" | Out-Null
+    Copy-Item $userActionOverridePath (Join-Path $EvidenceDir "user-action-override-removed.json") -Force
+    $receipt.phases.user_action_override_remove = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userActionOverrideSeeder.InstalledDir
+
+    Set-ProductMode -Mode "apply"
+    if (Test-Path $actionR4iPath) { Remove-Item $actionR4iPath -Force }
+    if (Test-Path $logPath) { Remove-Item $logPath -Force }
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $actionR4iPath -Process $productProcess
+    Copy-Item $actionR4iPath (Join-Path $EvidenceDir "user-action-override-reconcile.json") -Force
+    Copy-Item $actionLedgerPath (Join-Path $EvidenceDir "action-ledger-after-user-override-reconcile.json") -Force
+    $receipt.user_action_override_reconcile_plan_sha256 =
+        (Get-Content $actionR4iPath -Raw | ConvertFrom-Json).PlanSha256
+    $receipt.phases.user_action_override_reconcile = "PASS"
+    Stop-Playnite
+    $productProcess = $null
+
+    Set-ProductMode -Mode "observe"
+    Set-Content -Path $profilePath -Value "r4i-user-action-override-verify-v1" -Encoding UTF8
+    if (Test-Path $userActionOverridePath) { Remove-Item $userActionOverridePath -Force }
+    $userActionOverrideVerifySeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userActionOverridePath
+    Assert-UserActionOverrideReceipt -Path $userActionOverridePath -ExpectedMode "verify" | Out-Null
+    Copy-Item $userActionOverridePath (Join-Path $EvidenceDir "user-action-override-verified.json") -Force
+    $receipt.phases.user_action_override_verify = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userActionOverrideVerifySeeder.InstalledDir
+
+    Set-Content -Path $profilePath -Value "r4i-user-action-override-restore-v1" -Encoding UTF8
+    if (Test-Path $userActionOverridePath) { Remove-Item $userActionOverridePath -Force }
+    $userActionOverrideRestoreSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userActionOverridePath
+    Assert-UserActionOverrideReceipt -Path $userActionOverridePath -ExpectedMode "restore" | Out-Null
+    $receipt.phases.user_action_override_restore = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userActionOverrideRestoreSeeder.InstalledDir
+    Copy-Item $actionLedgerBackup $actionLedgerPath -Force
 
     Set-ProductMode -Mode "observe"
 
