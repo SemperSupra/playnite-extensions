@@ -131,6 +131,23 @@ namespace SemperSupraRdteSeeder
 
             if (string.Equals(
                     fixtureProfile,
+                    "r4i-user-cover-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-cover-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-cover-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserCoverOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
                     "r4i-conflict-apply-v1",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(
@@ -1235,6 +1252,125 @@ namespace SemperSupraRdteSeeder
                     true));
         }
 
+
+        private void RunUserCoverOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-cover-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-cover-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+            var statePath = Path.Combine(dataPath, "user-cover-override-prior.txt");
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool bookCoverPresent = false;
+            bool comicCoverPresent = false;
+
+            try
+            {
+                var book = PlayniteApi.Database.Games.Get(GameBook);
+                if (book == null)
+                {
+                    throw new InvalidOperationException(
+                        "Humble Ebook fixture is unavailable.");
+                }
+
+                if (remove)
+                {
+                    if (string.IsNullOrWhiteSpace(book.CoverImage))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected managed Ebook CoverImage before user-override injection.");
+                    }
+
+                    var fullPath = PlayniteApi.Database.GetFullFilePath(book.CoverImage);
+                    if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Ebook cover database file is unavailable before user override.");
+                    }
+
+                    File.WriteAllText(statePath, book.CoverImage);
+                    book.CoverImage = null;
+                    PlayniteApi.Database.Games.Update(book);
+                }
+                else if (restore && string.IsNullOrWhiteSpace(book.CoverImage))
+                {
+                    if (!File.Exists(statePath))
+                    {
+                        throw new InvalidOperationException(
+                            "Prior managed Ebook CoverImage state is unavailable for fixture cleanup.");
+                    }
+
+                    var priorCover = File.ReadAllText(statePath).Trim();
+                    var fullPath = PlayniteApi.Database.GetFullFilePath(priorCover);
+                    if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+                    {
+                        throw new InvalidOperationException(
+                            "Prior managed Ebook cover database file is unavailable for fixture cleanup.");
+                    }
+
+                    book.CoverImage = priorCover;
+                    PlayniteApi.Database.Games.Update(book);
+                }
+
+                var verifiedBook = PlayniteApi.Database.Games.Get(GameBook);
+                var verifiedComic = PlayniteApi.Database.Games.Get(GameComic);
+                bookCoverPresent =
+                    verifiedBook != null &&
+                    !string.IsNullOrWhiteSpace(verifiedBook.CoverImage);
+                comicCoverPresent =
+                    verifiedComic != null &&
+                    !string.IsNullOrWhiteSpace(verifiedComic.CoverImage);
+
+                var expectedBookCover = restore;
+                if (bookCoverPresent != expectedBookCover)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Ebook CoverImage was not restored for fixture cleanup."
+                            : "User-cleared Ebook CoverImage was reasserted.");
+                }
+                if (!comicCoverPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed Comic CoverImage changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Ebook CoverImage cleared through Playnite SDK."
+                    : restore
+                        ? "Managed Ebook CoverImage restored for fixture cleanup."
+                        : "User-cleared Ebook CoverImage remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-cover-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-cover-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        book_cover_present = bookCoverPresent,
+                        comic_cover_present = comicCoverPresent,
+                        detail = detail
+                    },
+                    true));
+        }
 
         private void RunCoverConflictFixture(
             string dataPath,
