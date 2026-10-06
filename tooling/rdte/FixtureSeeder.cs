@@ -40,8 +40,14 @@ namespace SemperSupraRdteSeeder
         private const string EnrichmentFilterPresetComicsName = "SemperSupra Media: Comics";
         private const string EnrichmentFilterPresetAudioName = "SemperSupra Media: Audio";
         private const string ExternalFilterPresetBooksName = "External Books Shelf";
+        private static readonly Guid MetadataUtilitiesExternalCategory =
+            Guid.Parse("74000000-0000-4000-8000-000000000001");
+        private static readonly Guid MetadataUtilitiesUnusedCategory =
+            Guid.Parse("74000000-0000-4000-8000-000000000002");
         private const string MetadataUtilitiesExternalCategoryName =
             "RDTE.MetadataUtilities.External";
+        private const string MetadataUtilitiesUnusedCategoryName =
+            "RDTE.MetadataUtilities.Unused";
 
         private static readonly Guid GameBook = Guid.Parse("73000000-0000-4000-8000-000000000001");
         private static readonly Guid GameComic = Guid.Parse("73000000-0000-4000-8000-000000000002");
@@ -202,10 +208,19 @@ namespace SemperSupraRdteSeeder
 
             if (string.Equals(
                     fixtureProfile,
+                    "metadata-utilities-coexistence-seed-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunMetadataUtilitiesCoexistenceSeedFixture(dataPath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
                     "metadata-utilities-coexistence-verify-v1",
                     StringComparison.OrdinalIgnoreCase))
             {
-                RunMetadataUtilitiesCoexistenceFixture(dataPath);
+                RunMetadataUtilitiesCoexistenceVerifyFixture(dataPath);
                 return;
             }
 
