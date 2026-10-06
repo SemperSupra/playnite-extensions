@@ -882,6 +882,15 @@ $receipt = [ordered]@{
     product_authority_sha = $env:RDTE_PRODUCT_AUTHORITY_SHA
     phases = [ordered]@{
         product_present = "NOT_RUN"
+        metadata_utilities_install = "NOT_RUN"
+        metadata_utilities_seed = "NOT_RUN"
+        metadata_utilities_cleanup_execute = "NOT_RUN"
+        metadata_utilities_cleanup_disabled = "NOT_RUN"
+        metadata_utilities_mutation = "NOT_RUN"
+        metadata_utilities_external_state_after_reapply = "NOT_RUN"
+        metadata_utilities_survives_product_uninstall = "NOT_RUN"
+        metadata_utilities_mutation_persisted = "NOT_RUN"
+        metadata_utilities_uninstall = "NOT_RUN"
         reapply = "NOT_RUN"
         native_persistence_uninstall = "NOT_RUN"
         native_persistence_verify = "NOT_RUN"
@@ -980,13 +989,60 @@ try {
     $receipt.phases.metadata_utilities_install = "PASS"
     Stop-Playnite
     $metadataInstall = $null
-    Set-MetadataUtilitiesCategoryAction -Enabled $true
-    $receipt.phases.metadata_utilities_action_configured = "PASS"
 
     $seederData = Join-Path $userData "ExtensionsData\$seederDataId"
     New-Item $seederData -ItemType Directory -Force | Out-Null
     $profilePath = Join-Path $seederData "fixture-profile.txt"
+    $metadataUtilitiesSeedPath =
+        Join-Path $seederData "metadata-utilities-coexistence-seed-receipt.json"
+    $metadataUtilitiesMutationPath =
+        Join-Path $seederData "metadata-utilities-coexistence-receipt.json"
 
+    # Seed one used and one unused external category independently of both products.
+    Set-ProductMode -Mode "observe"
+    Set-Content -Path $profilePath -Value "metadata-utilities-coexistence-seed-v1" -Encoding UTF8
+    if (Test-Path $metadataUtilitiesSeedPath) {
+        Remove-Item $metadataUtilitiesSeedPath -Force
+    }
+    $metadataSeedSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $metadataUtilitiesSeedPath
+    $metadataSeed =
+        Assert-MetadataUtilitiesSeedReceipt -Path $metadataUtilitiesSeedPath
+    Copy-Item $metadataUtilitiesSeedPath (Join-Path $EvidenceDir "metadata-utilities-seeded.json") -Force
+    $receipt.metadata_utilities_external_category_id =
+        $metadataSeed.external_category_id
+    $receipt.phases.metadata_utilities_seed = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $metadataSeedSeeder.InstalledDir
+
+    # Drive an actual Metadata Utilities mutation through its native startup cleanup path.
+    Set-MetadataUtilitiesCleanup -Enabled $true
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+    $metadataCleanupProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $metadataUtilitiesName, version $metadataUtilitiesVersion" -Process $metadataCleanupProcess
+    Wait-ForText -Path $logPath -Text "Removed unused metadata:" -Process $metadataCleanupProcess
+    $receipt.phases.metadata_utilities_cleanup_execute = "PASS"
+    Stop-Playnite
+    $metadataCleanupProcess = $null
+
+    # Disable the third-party mutation before measuring persistence/non-interference.
+    Set-MetadataUtilitiesCleanup -Enabled $false
+    $receipt.phases.metadata_utilities_cleanup_disabled = "PASS"
+
+    Set-Content -Path $profilePath -Value "metadata-utilities-coexistence-verify-v1" -Encoding UTF8
+    if (Test-Path $metadataUtilitiesMutationPath) {
+        Remove-Item $metadataUtilitiesMutationPath -Force
+    }
+    $metadataVerifySeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $metadataUtilitiesMutationPath
+    $metadataUtilitiesMutation =
+        Assert-MetadataUtilitiesCoexistenceReceipt -Path $metadataUtilitiesMutationPath
+    Copy-Item $metadataUtilitiesMutationPath (Join-Path $EvidenceDir "metadata-utilities-cleanup-verified.json") -Force
+    $receipt.phases.metadata_utilities_mutation = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $metadataVerifySeeder.InstalledDir
+
+    # Now exercise ordinary MLE reconciliation while the real external add-on remains installed.
     Set-ProductMode -Mode "apply"
     $r4iPath = Join-Path $userData "ExtensionsData\$pluginId\r4i-receipt.json"
     $actionR4iPath = Join-Path $userData "ExtensionsData\$pluginId\action-r4i-receipt.json"
@@ -1000,6 +1056,7 @@ try {
     }
     $productProcess = Start-Playnite
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $metadataUtilitiesName, version $metadataUtilitiesVersion" -Process $productProcess
     Wait-ForFile -Path $r4iPath -Process $productProcess
 
     $reapply = Assert-Reapply -Path $r4iPath
@@ -1010,25 +1067,18 @@ try {
     Stop-Playnite
     $productProcess = $null
 
+    # Verify the used external state survives MLE reconciliation with cleanup disabled.
     Set-ProductMode -Mode "observe"
-    $metadataUtilitiesMutationPath =
-        Join-Path $seederData "metadata-utilities-coexistence-receipt.json"
     Set-Content -Path $profilePath -Value "metadata-utilities-coexistence-verify-v1" -Encoding UTF8
     if (Test-Path $metadataUtilitiesMutationPath) {
         Remove-Item $metadataUtilitiesMutationPath -Force
     }
-    $metadataMutationSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $metadataUtilitiesMutationPath
-    $metadataUtilitiesMutation =
-        Assert-MetadataUtilitiesCoexistenceReceipt -Path $metadataUtilitiesMutationPath
-    Copy-Item $metadataUtilitiesMutationPath (Join-Path $EvidenceDir "metadata-utilities-external-category-created.json") -Force
-    $receipt.metadata_utilities_external_category_id =
-        $metadataUtilitiesMutation.category_id
-    $receipt.phases.metadata_utilities_mutation = "PASS"
+    $metadataReapplyVerifySeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $metadataUtilitiesMutationPath
+    Assert-MetadataUtilitiesCoexistenceReceipt -Path $metadataUtilitiesMutationPath | Out-Null
+    Copy-Item $metadataUtilitiesMutationPath (Join-Path $EvidenceDir "metadata-utilities-external-category-after-mle-reapply.json") -Force
+    $receipt.phases.metadata_utilities_external_state_after_reapply = "PASS"
     Stop-Playnite
-    Native-Uninstall -InstalledDir $metadataMutationSeeder.InstalledDir
-
-    Set-MetadataUtilitiesCategoryAction -Enabled $false
-    $receipt.phases.metadata_utilities_reassertion_disabled = "PASS"
+    Native-Uninstall -InstalledDir $metadataReapplyVerifySeeder.InstalledDir
 
     # Release gate: native enrichment must remain useful after product uninstall
     # when rollback was not requested.
