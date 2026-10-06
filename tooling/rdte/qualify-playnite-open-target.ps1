@@ -159,8 +159,6 @@ if ($LASTEXITCODE -ne 0) { throw "Handler compilation failed." }
 if ($LASTEXITCODE -ne 0) { throw "Invoker compilation failed." }
 
 $classesRoot = "HKCU:\Software\Classes"
-$extension = ".rdteplaynite"
-$extensionKey = Join-Path $classesRoot $extension
 $progId = "SemperSupra.RDTE.PlayniteFile"
 $progIdKey = Join-Path $classesRoot $progId
 $commandKey = Join-Path $progIdKey "shell\open\command"
@@ -168,98 +166,110 @@ $uriScheme = "rdteplaynite"
 $uriKey = Join-Path $classesRoot $uriScheme
 $uriCommandKey = Join-Path $uriKey "shell\open\command"
 $handlerReceipt = Join-Path $work "handler-receipt.txt"
-$target = Join-Path $work ("fixture" + $extension)
-Set-Content -LiteralPath $target -Value "%PDF-1.4`n% SemperSupra Playnite 10.62 OPEN_TARGET fixture`n" -Encoding ASCII
+$extensionKeys = New-Object System.Collections.Generic.List[string]
+
+$modalities = @(
+    [ordered]@{ name = "pdf";   extension = ".rdtepdf";   marker = "%PDF-1.4" },
+    [ordered]@{ name = "epub";  extension = ".rdteepub";  marker = "PK EPUB" },
+    [ordered]@{ name = "cbz";   extension = ".rdtecbz";   marker = "PK CBZ" },
+    [ordered]@{ name = "audio"; extension = ".rdteaudio"; marker = "fLaC" },
+    [ordered]@{ name = "video"; extension = ".rdtevideo"; marker = "ftypisom" },
+    [ordered]@{ name = "image"; extension = ".rdteimage"; marker = "PNG" }
+)
 
 $receipt = [ordered]@{
-    schema = "sempersupra-playnite-open-target-rdte/v1"
+    schema = "sempersupra-playnite-open-target-rdte/v2"
     source_sha = if ($env:RDTE_SOURCE_SHA) { $env:RDTE_SOURCE_SHA } elseif ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "" }
     playnite_version = $manifest.playnite_version
     playnite_portable_sha256 = $archiveSha
+    file_modalities = @()
+    uri_handler_received_exact_target = $false
     result = "RUNNING"
 }
 
+function Invoke-PlayniteTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    Remove-Item -LiteralPath $handlerReceipt -Force -ErrorAction SilentlyContinue
+    $run = Start-Process -FilePath $invokerExe -ArgumentList @(
+        $playniteHome,
+        $playniteDll,
+        $Mode,
+        $Target
+    ) -PassThru -Wait
+
+    if ($run.ExitCode -ne 0) {
+        $errorPath = Join-Path $playniteHome "open-target-invocation-error.txt"
+        $errorDetail = if (Test-Path -LiteralPath $errorPath) {
+            (Get-Content -LiteralPath $errorPath -Raw).Trim()
+        }
+        else {
+            "No invocation error receipt was produced."
+        }
+        throw "Playnite target probe returned $($run.ExitCode): $errorDetail"
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while (-not (Test-Path -LiteralPath $handlerReceipt) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path -LiteralPath $handlerReceipt)) {
+        throw "Playnite target dispatch did not reach the registered handler."
+    }
+
+    return (Get-Content -LiteralPath $handlerReceipt -Raw).Trim()
+}
+
 try {
-    New-Item -Path $extensionKey -Force | Out-Null
-    Set-Item -Path $extensionKey -Value $progId
     New-Item -Path $commandKey -Force | Out-Null
     Set-Item -Path $commandKey -Value ('"' + $handlerExe + '" "%1"')
+
+    foreach ($modality in $modalities) {
+        $extensionKey = Join-Path $classesRoot $modality.extension
+        $extensionKeys.Add($extensionKey)
+        New-Item -Path $extensionKey -Force | Out-Null
+        Set-Item -Path $extensionKey -Value $progId
+
+        $target = Join-Path $work ("fixture-" + $modality.name + $modality.extension)
+        Set-Content -LiteralPath $target -Value $modality.marker -Encoding ASCII
+
+        $env:RDTE_PLAYNITE_OPEN_TARGET_RECEIPT = $handlerReceipt
+        $received = Invoke-PlayniteTarget -Mode "file" -Target $target
+        $expected = [IO.Path]::GetFullPath($target)
+        if ($received -ne $expected) {
+            throw "Playnite target mismatch for modality '$($modality.name)'."
+        }
+
+        $receipt.file_modalities += [ordered]@{
+            name = $modality.name
+            extension = $modality.extension
+            exact_target = $true
+        }
+    }
 
     New-Item -Path $uriCommandKey -Force | Out-Null
     Set-Item -Path $uriKey -Value "URL:SemperSupra Playnite RDTE protocol"
     New-ItemProperty -Path $uriKey -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
     Set-Item -Path $uriCommandKey -Value ('"' + $handlerExe + '" "%1"')
 
-    $env:RDTE_PLAYNITE_OPEN_TARGET_RECEIPT = $handlerReceipt
-
-    $fileRun = Start-Process -FilePath $invokerExe -ArgumentList @(
-        $playniteHome,
-        $playniteDll,
-        "file",
-        $target
-    ) -PassThru -Wait
-    if ($fileRun.ExitCode -ne 0) {
-        $errorPath = Join-Path $playniteHome "open-target-invocation-error.txt"
-        $errorDetail = if (Test-Path -LiteralPath $errorPath) {
-            (Get-Content -LiteralPath $errorPath -Raw).Trim()
-        }
-        else {
-            "No invocation error receipt was produced."
-        }
-        throw "Playnite ProcessStarter file probe returned $($fileRun.ExitCode): $errorDetail"
-    }
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (-not (Test-Path -LiteralPath $handlerReceipt) -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not (Test-Path -LiteralPath $handlerReceipt)) {
-        throw "Playnite ProcessStarter did not reach the registered file handler."
-    }
-    $receivedFile = (Get-Content -LiteralPath $handlerReceipt -Raw).Trim()
-    if ($receivedFile -ne [IO.Path]::GetFullPath($target)) {
-        throw "Playnite ProcessStarter file target mismatch."
-    }
-
-    Remove-Item -LiteralPath $handlerReceipt -Force
     $uriTarget = "rdteplaynite://fixture/media?id=42"
-    $uriRun = Start-Process -FilePath $invokerExe -ArgumentList @(
-        $playniteHome,
-        $playniteDll,
-        "uri",
-        $uriTarget
-    ) -PassThru -Wait
-    if ($uriRun.ExitCode -ne 0) {
-        $errorPath = Join-Path $playniteHome "open-target-invocation-error.txt"
-        $errorDetail = if (Test-Path -LiteralPath $errorPath) {
-            (Get-Content -LiteralPath $errorPath -Raw).Trim()
-        }
-        else {
-            "No invocation error receipt was produced."
-        }
-        throw "Playnite ProcessStarter URI probe returned $($uriRun.ExitCode): $errorDetail"
-    }
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (-not (Test-Path -LiteralPath $handlerReceipt) -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not (Test-Path -LiteralPath $handlerReceipt)) {
-        throw "Playnite StartUrl did not reach the registered URI handler."
-    }
-    $receivedUri = (Get-Content -LiteralPath $handlerReceipt -Raw).Trim()
+    $receivedUri = Invoke-PlayniteTarget -Mode "uri" -Target $uriTarget
     if ($receivedUri -ne $uriTarget) {
-        throw "Playnite StartUrl URI target mismatch."
+        throw "Playnite URI target mismatch."
     }
 
-    $receipt.file_handler_received_exact_target = $true
     $receipt.uri_handler_received_exact_target = $true
     $receipt.result = "PASS"
 }
 finally {
     Remove-Item Env:\RDTE_PLAYNITE_OPEN_TARGET_RECEIPT -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $progIdKey -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $extensionKey -Recurse -Force -ErrorAction SilentlyContinue
+    foreach ($extensionKey in $extensionKeys) {
+        Remove-Item -LiteralPath $extensionKey -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item -LiteralPath $uriKey -Recurse -Force -ErrorAction SilentlyContinue
     $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceDir "playnite-open-target-receipt.json") -Encoding UTF8
 }
