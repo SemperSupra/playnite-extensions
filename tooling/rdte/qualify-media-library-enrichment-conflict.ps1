@@ -6,6 +6,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$EvidenceDir,
 
+    [Parameter(Mandatory = $true)]
+    [string]$MetadataUtilitiesPackage,
+
     [int]$StartupTimeoutSeconds = 45
 )
 
@@ -18,6 +21,10 @@ $seederId = "SemperSupraRdteSeeder_6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
 $seederDataId = "6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
 $seederName = "RDTE Fixture Seeder"
 $bookCategoryName = "SemperSupra.Media:Book"
+$metadataUtilitiesId = "MetadataUtilities_485ab5f0-bfb1-4c17-93cc-20d8338673be"
+$metadataUtilitiesName = "Metadata Utilities"
+$metadataUtilitiesVersion = "1.9.0"
+$metadataUtilitiesSha256 = "8b5c3ce5b5aeb3eb1d476083f36aaa5fa58498d3f366666b7ddc56cc40400cf8"
 
 $userData = Join-Path $WorkRoot "userdata"
 $runtimeDir = Join-Path $WorkRoot "runtime"
@@ -848,7 +855,23 @@ $receipt = [ordered]@{
 }
 
 $productProcess = $null
+$metadataUtilitiesInstalledDir = $null
 try {
+    if (-not (Test-Path $MetadataUtilitiesPackage -PathType Leaf)) {
+        throw "Pinned Metadata Utilities package was not materialized."
+    }
+    $observedMetadataUtilitiesSha256 =
+        (Get-FileHash -Path $MetadataUtilitiesPackage -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($observedMetadataUtilitiesSha256 -ne $metadataUtilitiesSha256) {
+        throw "Pinned Metadata Utilities package SHA-256 mismatch."
+    }
+    $receipt.metadata_utilities = [ordered]@{
+        id = $metadataUtilitiesId
+        name = $metadataUtilitiesName
+        version = $metadataUtilitiesVersion
+        sha256 = $observedMetadataUtilitiesSha256
+    }
+
     $pluginReceipt = Get-Content (Join-Path $EvidenceDir "receipt.json") -Raw |
         ConvertFrom-Json
     $productVersion = $pluginReceipt.version
@@ -881,6 +904,12 @@ try {
         throw "Media Library Enrichment was not left installed for the conflict rep."
     }
     $receipt.phases.product_present = "PASS"
+
+    $metadataInstall = Native-InstallAndRun -PackagePath $MetadataUtilitiesPackage -ExpectedId $metadataUtilitiesId -ExpectedName $metadataUtilitiesName -ExpectedVersion $metadataUtilitiesVersion -ReadyFile $null
+    $metadataUtilitiesInstalledDir = $metadataInstall.InstalledDir
+    $receipt.phases.metadata_utilities_install = "PASS"
+    Stop-Playnite
+    $metadataInstall = $null
 
     $seederData = Join-Path $userData "ExtensionsData\$seederDataId"
     New-Item $seederData -ItemType Directory -Force | Out-Null
@@ -1477,6 +1506,23 @@ try {
 
     Native-Uninstall -InstalledDir $productInstalledDir
     $receipt.phases.product_uninstall = "PASS"
+
+    $metadataUtilitiesInstalledDir = Find-InstalledExtension -ExpectedId $metadataUtilitiesId
+    if (-not $metadataUtilitiesInstalledDir) {
+        throw "Metadata Utilities did not survive Media Library Enrichment uninstall."
+    }
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force
+    }
+    $metadataVerifyProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $metadataUtilitiesName, version $metadataUtilitiesVersion" -Process $metadataVerifyProcess
+    $receipt.phases.metadata_utilities_survives_product_uninstall = "PASS"
+    Stop-Playnite
+    $metadataVerifyProcess = $null
+
+    Native-Uninstall -InstalledDir $metadataUtilitiesInstalledDir
+    $metadataUtilitiesInstalledDir = $null
+    $receipt.phases.metadata_utilities_uninstall = "PASS"
 
     $pluginData = Join-Path $userData "ExtensionsData\$pluginId"
     foreach ($name in @(
