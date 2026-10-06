@@ -9,6 +9,13 @@ namespace MediaLibraryEnrichment
         public string CategoryName { get; set; }
     }
 
+    public enum CategoryMembershipDecision
+    {
+        Noop,
+        AddMembership,
+        UserOverride
+    }
+
     public static class CategoryEnrichmentPolicy
     {
         private static readonly CategoryEnrichmentSpec Book = new CategoryEnrichmentSpec
@@ -31,6 +38,30 @@ namespace MediaLibraryEnrichment
             CategoryId = Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1403"),
             CategoryName = "SemperSupra.Media:Audio"
         };
+
+        public static CategoryMembershipDecision DecideMembership(
+            bool membershipPresent,
+            string ledgerStatus)
+        {
+            if (membershipPresent)
+            {
+                return CategoryMembershipDecision.Noop;
+            }
+
+            if (string.Equals(
+                    ledgerStatus,
+                    "COMMITTED",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    ledgerStatus,
+                    "USER_OVERRIDDEN",
+                    StringComparison.Ordinal))
+            {
+                return CategoryMembershipDecision.UserOverride;
+            }
+
+            return CategoryMembershipDecision.AddMembership;
+        }
 
         public static CategoryEnrichmentSpec ForKind(string kind)
         {
