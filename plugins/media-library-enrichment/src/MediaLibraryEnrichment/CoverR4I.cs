@@ -35,6 +35,25 @@ namespace MediaLibraryEnrichment
                     continue;
                 }
 
+                if (string.Equals(operation.Outcome, "USER_OVERRIDE", StringComparison.Ordinal))
+                {
+                    receipt.UserOverrideCount++;
+                    var overrideEntry = FindCoverLedgerEntry(
+                        ledger,
+                        operation.PlayniteId,
+                        operation.EvidenceKey);
+                    if (overrideEntry != null &&
+                        !string.Equals(
+                            overrideEntry.Status,
+                            "USER_OVERRIDDEN",
+                            StringComparison.Ordinal))
+                    {
+                        overrideEntry.Status = "USER_OVERRIDDEN";
+                        ledger.Save(ledgerPath);
+                    }
+                    continue;
+                }
+
                 if (operation.Outcome.StartsWith("CONFLICT", StringComparison.Ordinal))
                 {
                     receipt.ConflictCount++;
@@ -196,7 +215,8 @@ namespace MediaLibraryEnrichment
                 var decision = CoverEnrichmentPolicy.Decide(
                     EvidenceFileMatches(item),
                     !string.IsNullOrWhiteSpace(game.CoverImage),
-                    matchesOwned);
+                    matchesOwned,
+                    entry == null ? null : entry.Status);
 
                 switch (decision)
                 {
@@ -207,6 +227,11 @@ namespace MediaLibraryEnrichment
                     case CoverPlanDecision.Noop:
                         operation.Outcome = "NOOP";
                         operation.Detail = "Plugin-owned CoverImage already matches desired evidence.";
+                        break;
+                    case CoverPlanDecision.UserOverride:
+                        operation.Outcome = "USER_OVERRIDE";
+                        operation.Detail =
+                            "Previously managed CoverImage is absent outside plugin rollback; preserve the external/user override.";
                         break;
                     case CoverPlanDecision.ConflictEvidence:
                         operation.Outcome = "CONFLICT_EVIDENCE";
