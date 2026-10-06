@@ -113,7 +113,8 @@ $receipt = [ordered]@{
     schema = "sempersupra-open-target-rdte/v1"
     source_sha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "" }
     target_kind = "local-file"
-    target_extension = ".rdtepdf"\n    payload_format = "pdf"
+    target_extension = ".rdtepdf"
+    payload_format = "pdf"
     shell_execute = $true
     result = "RUNNING"
 }
