@@ -601,6 +601,47 @@ function Assert-UserActionOverrideReceipt {
     return $value
 }
 
+function Assert-UserFilterPresetOverrideReceipt {
+    param(
+        [string]$Path,
+        [ValidateSet("remove", "verify", "restore")][string]$ExpectedMode
+    )
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    $expectedBooksPreset = $ExpectedMode -eq "restore"
+    if ($value.schema -ne "sempersupra-playnite-user-filter-preset-override-fixture/v1" -or
+        $value.mode -ne $ExpectedMode -or
+        $value.result -ne "PASS" -or
+        $value.preset_id -ne "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501" -or
+        $value.preset_name -ne "SemperSupra Media: Books" -or
+        $value.books_preset_present -ne $expectedBooksPreset -or
+        $value.other_managed_presets -ne 2) {
+        throw "Fixture seeder did not prove '$ExpectedMode' user-filter-preset override state."
+    }
+
+    return $value
+}
+
+function Assert-UserFilterPresetOverrideReconcile {
+    param([string]$ReceiptPath)
+
+    $reconcile = Get-Content $ReceiptPath -Raw | ConvertFrom-Json
+    $books = @($reconcile.Operations | Where-Object {
+        $_.PresetId -eq "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501"
+    })
+    if ($reconcile.Mode -ne "apply" -or
+        $reconcile.CandidateCount -ne 3 -or
+        $reconcile.AppliedCount -ne 0 -or
+        $reconcile.NoopCount -ne 2 -or
+        $reconcile.ConflictCount -ne 0 -or
+        $books.Count -ne 1 -or
+        $books[0].Outcome -ne "USER_OVERRIDE") {
+        throw "Product reconcile reasserted the user-removed Books shelf or failed to surface it as USER_OVERRIDE."
+    }
+
+    return $reconcile
+}
+
 function Assert-UserActionOverrideReconcile {
     param(
         [string]$ReceiptPath,
@@ -700,6 +741,10 @@ $receipt = [ordered]@{
         user_action_override_reconcile = "NOT_RUN"
         user_action_override_verify = "NOT_RUN"
         user_action_override_restore = "NOT_RUN"
+        user_filter_preset_override_remove = "NOT_RUN"
+        user_filter_preset_override_reconcile = "NOT_RUN"
+        user_filter_preset_override_verify = "NOT_RUN"
+        user_filter_preset_override_restore = "NOT_RUN"
         external_conflict_inject = "NOT_RUN"
         conflict_rollback = "NOT_RUN"
         external_conflict_verify = "NOT_RUN"
@@ -960,6 +1005,56 @@ try {
     Stop-Playnite
     Native-Uninstall -InstalledDir $userActionOverrideRestoreSeeder.InstalledDir
     Copy-Item $actionLedgerBackup $actionLedgerPath -Force
+
+    # Continue release gate #4 with complete external deletion of the managed
+    # Books media shelf. Start from integrated product bytes and falsify before repair.
+    $filterPresetLedgerPath = Join-Path $userData "ExtensionsData\$pluginId\filter-preset-ledger.json"
+    $filterPresetLedgerBackup = Join-Path $EvidenceDir "filter-preset-ledger-before-user-override.json"
+    Copy-Item $filterPresetLedgerPath $filterPresetLedgerBackup -Force
+
+    Set-ProductMode -Mode "observe"
+    $userFilterPresetOverridePath = Join-Path $seederData "user-filter-preset-override-receipt.json"
+    Set-Content -Path $profilePath -Value "r4i-user-filter-preset-override-remove-v1" -Encoding UTF8
+    if (Test-Path $userFilterPresetOverridePath) { Remove-Item $userFilterPresetOverridePath -Force }
+    $userFilterPresetOverrideSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userFilterPresetOverridePath
+    Assert-UserFilterPresetOverrideReceipt -Path $userFilterPresetOverridePath -ExpectedMode "remove" | Out-Null
+    Copy-Item $userFilterPresetOverridePath (Join-Path $EvidenceDir "user-filter-preset-override-removed.json") -Force
+    $receipt.phases.user_filter_preset_override_remove = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userFilterPresetOverrideSeeder.InstalledDir
+
+    Set-ProductMode -Mode "apply"
+    if (Test-Path $filterPresetR4iPath) { Remove-Item $filterPresetR4iPath -Force }
+    if (Test-Path $logPath) { Remove-Item $logPath -Force }
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $filterPresetR4iPath -Process $productProcess
+    $userFilterPresetOverrideReconcile = Assert-UserFilterPresetOverrideReconcile -ReceiptPath $filterPresetR4iPath
+    Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "user-filter-preset-override-reconcile.json") -Force
+    $receipt.user_filter_preset_override_reconcile_plan_sha256 =
+        $userFilterPresetOverrideReconcile.PlanSha256
+    $receipt.phases.user_filter_preset_override_reconcile = "PASS"
+    Stop-Playnite
+    $productProcess = $null
+
+    Set-ProductMode -Mode "observe"
+    Set-Content -Path $profilePath -Value "r4i-user-filter-preset-override-verify-v1" -Encoding UTF8
+    if (Test-Path $userFilterPresetOverridePath) { Remove-Item $userFilterPresetOverridePath -Force }
+    $userFilterPresetOverrideVerifySeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userFilterPresetOverridePath
+    Assert-UserFilterPresetOverrideReceipt -Path $userFilterPresetOverridePath -ExpectedMode "verify" | Out-Null
+    Copy-Item $userFilterPresetOverridePath (Join-Path $EvidenceDir "user-filter-preset-override-verified.json") -Force
+    $receipt.phases.user_filter_preset_override_verify = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userFilterPresetOverrideVerifySeeder.InstalledDir
+
+    Set-Content -Path $profilePath -Value "r4i-user-filter-preset-override-restore-v1" -Encoding UTF8
+    if (Test-Path $userFilterPresetOverridePath) { Remove-Item $userFilterPresetOverridePath -Force }
+    $userFilterPresetOverrideRestoreSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userFilterPresetOverridePath
+    Assert-UserFilterPresetOverrideReceipt -Path $userFilterPresetOverridePath -ExpectedMode "restore" | Out-Null
+    $receipt.phases.user_filter_preset_override_restore = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userFilterPresetOverrideRestoreSeeder.InstalledDir
+    Copy-Item $filterPresetLedgerBackup $filterPresetLedgerPath -Force
 
     Set-ProductMode -Mode "observe"
 
