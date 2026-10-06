@@ -27,6 +27,7 @@ $metadataUtilitiesVersion = "1.9.0"
 $metadataUtilitiesSha256 = "8b5c3ce5b5aeb3eb1d476083f36aaa5fa58498d3f366666b7ddc56cc40400cf8"
 $metadataUtilitiesDataId = "485ab5f0-bfb1-4c17-93cc-20d8338673be"
 $metadataUtilitiesExternalCategoryName = "RDTE.MetadataUtilities.External"
+$metadataUtilitiesUnusedCategoryName = "RDTE.MetadataUtilities.Unused"
 
 $userData = Join-Path $WorkRoot "userdata"
 $runtimeDir = Join-Path $WorkRoot "runtime"
@@ -181,62 +182,68 @@ function Set-ProductMode {
         Set-Content -Path (Join-Path $pluginData "settings.json") -Encoding UTF8
 }
 
-function Set-MetadataUtilitiesCategoryAction {
+function Set-MetadataUtilitiesCleanup {
     param([bool]$Enabled)
 
     $dataPath = Join-Path $userData "ExtensionsData\$metadataUtilitiesDataId"
     New-Item $dataPath -ItemType Directory -Force | Out-Null
     $configPath = Join-Path $dataPath "config.json"
 
-    $conditionalActions = @()
+    $typeConfigs = @()
     if ($Enabled) {
-        $conditionalActions = @(
+        $typeConfigs = @(
             [ordered]@{
-                Actions = @(
-                    [ordered]@{
-                        ActionType = 0
-                        Name = $metadataUtilitiesExternalCategoryName
-                        Type = 0
-                    }
-                )
-                CanBeExecutedManually = $false
-                Conditions = @()
-                Enabled = $true
-                ExecuteOnNewBeforeMetadata = $false
-                FalseActions = @()
-                IgnoreConditionOnManual = $false
-                Name = "RDTE MLE coexistence external category"
-                SortNo = 0
+                HiddenAsUnused = $false
+                RemoveUnusedItems = $true
+                Selected = $true
                 Type = 0
             }
         )
     }
 
     [ordered]@{
-        ConditionalActions = $conditionalActions
+        ConditionalActions = @()
         MergeMetadataOnMetadataUpdate = $false
         RemoveUnwantedOnMetadataUpdate = $false
         ShowTopPanelButton = $false
         ShowTopPanelSettingsButton = $false
         ShowUserScoreMenu = $false
+        TypeConfigs = $typeConfigs
         WriteDebugLog = $true
     } |
-        ConvertTo-Json -Depth 12 |
+        ConvertTo-Json -Depth 8 |
         Set-Content -Path $configPath -Encoding UTF8
+}
+
+function Assert-MetadataUtilitiesSeedReceipt {
+    param([string]$Path)
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($value.schema -ne "sempersupra-playnite-metadata-utilities-coexistence-seed/v1" -or
+        $value.result -ne "PASS" -or
+        $value.external_category_name -ne $metadataUtilitiesExternalCategoryName -or
+        $value.unused_category_name -ne $metadataUtilitiesUnusedCategoryName -or
+        $value.media_memberships -ne 4 -or
+        $value.ordinary_manual_membership -ne $false) {
+        throw "Metadata Utilities coexistence seed state is invalid."
+    }
+
+    return $value
 }
 
 function Assert-MetadataUtilitiesCoexistenceReceipt {
     param([string]$Path)
 
     $value = Get-Content $Path -Raw | ConvertFrom-Json
-    if ($value.schema -ne "sempersupra-playnite-metadata-utilities-coexistence-fixture/v1" -or
+    if ($value.schema -ne "sempersupra-playnite-metadata-utilities-coexistence-fixture/v2" -or
         $value.result -ne "PASS" -or
-        $value.category_name -ne $metadataUtilitiesExternalCategoryName -or
+        $value.external_category_name -ne $metadataUtilitiesExternalCategoryName -or
+        $value.unused_category_name -ne $metadataUtilitiesUnusedCategoryName -or
         $value.expected_media_memberships -ne 4 -or
         $value.observed_media_memberships -ne 4 -or
         $value.ordinary_manual_membership -ne $false -or
-        [string]::IsNullOrWhiteSpace($value.category_id)) {
-        throw "Metadata Utilities did not produce or preserve the expected external category mutation."
+        $value.unused_category_present -ne $false) {
+        throw "Metadata Utilities cleanup/preservation oracle failed."
     }
 
     return $value
