@@ -24,7 +24,16 @@ public static class Handler
             return 30;
         }
 
-        File.WriteAllText(receipt, Path.GetFullPath(args[0]));
+        Uri uri;
+        if (Uri.TryCreate(args[0], UriKind.Absolute, out uri) &&
+            !String.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
+        {
+            File.WriteAllText(receipt, args[0]);
+        }
+        else
+        {
+            File.WriteAllText(receipt, Path.GetFullPath(args[0]));
+        }
         return 0;
     }
 }
@@ -102,6 +111,9 @@ $extensionKey = Join-Path $classesRoot ".rdtepdf"
 $progId = "SemperSupra.RDTE.Pdf"
 $progIdKey = Join-Path $classesRoot $progId
 $commandKey = Join-Path $progIdKey "shell\open\command"
+$uriScheme = "rdteopen"
+$uriKey = Join-Path $classesRoot $uriScheme
+$uriCommandKey = Join-Path $uriKey "shell\open\command"
 
 $extensionExisted = Test-Path -LiteralPath $extensionKey
 $previousDefault = $null
@@ -161,21 +173,48 @@ try {
     $unassociated = Join-Path $work "fixture.rdtenone"
     Set-Content -LiteralPath $unassociated -Value "SemperSupra unassociated target" -Encoding ASCII
     $unassociatedRun = Start-Process -FilePath $invokerExe -ArgumentList @($unassociated) -PassThru -Wait
-    if ($unassociatedRun.ExitCode -ne 20) {
-        throw "Unassociated-target dispatch returned $($unassociatedRun.ExitCode), expected 20."
+    if ($unassociatedRun.ExitCode -ne 0 -and $unassociatedRun.ExitCode -ne 20) {
+        throw "Unexpected unassociated-target dispatch exit code $($unassociatedRun.ExitCode)."
     }
     if (Test-Path -LiteralPath $handlerReceipt) {
-        throw "Handler was invoked for an unassociated target."
+        throw "Known RDTE handler was invoked for an unassociated target."
+    }
+
+    New-Item -Path $uriCommandKey -Force | Out-Null
+    Set-Item -Path $uriKey -Value "URL:SemperSupra RDTE protocol"
+    New-ItemProperty -Path $uriKey -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+    Set-Item -Path $uriCommandKey -Value ('"' + $handlerExe + '" "%1"')
+
+    $uriTarget = "rdteopen://fixture/media?id=42"
+    Remove-Item -LiteralPath $handlerReceipt -Force -ErrorAction SilentlyContinue
+    $uriRun = Start-Process -FilePath $invokerExe -ArgumentList @($uriTarget) -PassThru -Wait
+    if ($uriRun.ExitCode -ne 0) {
+        throw "URI shell-open probe returned exit code $($uriRun.ExitCode)."
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while (-not (Test-Path -LiteralPath $handlerReceipt) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path -LiteralPath $handlerReceipt)) {
+        throw "Registered URI handler did not receive the target."
+    }
+    $receivedUri = (Get-Content -LiteralPath $handlerReceipt -Raw).Trim()
+    if ($receivedUri -ne $uriTarget) {
+        throw "Registered URI handler received the wrong target."
     }
 
     $receipt.handler_received_exact_target = $true
     $receipt.missing_target_exit_code = $missingRun.ExitCode
     $receipt.unassociated_target_exit_code = $unassociatedRun.ExitCode
+    $receipt.unassociated_policy = "delegate-to-os"
+    $receipt.uri_handler_received_exact_target = $true
     $receipt.result = "PASS"
 }
 finally {
     Remove-Item Env:\RDTE_OPEN_TARGET_RECEIPT -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $progIdKey -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $uriKey -Recurse -Force -ErrorAction SilentlyContinue
 
     if ($extensionExisted) {
         New-Item -Path $extensionKey -Force | Out-Null
