@@ -42,6 +42,50 @@ namespace MediaLibraryEnrichment.Core.Tests
             Assert.Null(FilterPresetEnrichmentPolicy.ForKind("video"));
         }
 
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("PLANNED")]
+        [InlineData("ROLLED_BACK")]
+        public void MissingPresetWithoutCommittedOwnershipIsAddable(string status)
+        {
+            Assert.Equal(
+                FilterPresetPresenceDecision.AddPreset,
+                FilterPresetEnrichmentPolicy.DecidePresence(false, false, status));
+        }
+
+        [Theory]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void MissingPreviouslyCommittedPresetIsAUserOverride(string status)
+        {
+            Assert.Equal(
+                FilterPresetPresenceDecision.UserOverride,
+                FilterPresetEnrichmentPolicy.DecidePresence(false, false, status));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void ExistingDesiredPresetIsAlwaysANoop(string status)
+        {
+            Assert.Equal(
+                FilterPresetPresenceDecision.Noop,
+                FilterPresetEnrichmentPolicy.DecidePresence(true, false, status));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void ChangedPresetIdentityRemainsAConflict(string status)
+        {
+            Assert.Equal(
+                FilterPresetPresenceDecision.Conflict,
+                FilterPresetEnrichmentPolicy.DecidePresence(false, true, status));
+        }
+
         [Fact]
         public void StablePresetIdsAreUnique()
         {
