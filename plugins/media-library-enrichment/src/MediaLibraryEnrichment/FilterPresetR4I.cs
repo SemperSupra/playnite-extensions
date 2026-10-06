@@ -13,7 +13,7 @@ namespace MediaLibraryEnrichment
             FilterPresetLedger ledger,
             string ledgerPath)
         {
-            var operations = BuildFilterPresetApplyPlan();
+            var operations = BuildFilterPresetApplyPlan(ledger);
             var receipt = new FilterPresetReconcileReceipt
             {
                 Mode = "apply",
@@ -31,6 +31,23 @@ namespace MediaLibraryEnrichment
                         operation,
                         ledger,
                         ledgerPath);
+                    continue;
+                }
+
+                if (string.Equals(operation.Outcome, "USER_OVERRIDE", StringComparison.Ordinal))
+                {
+                    receipt.UserOverrideCount++;
+                    var overrideEntry =
+                        FindFilterPresetLedgerEntry(ledger, operation.PresetId);
+                    if (overrideEntry != null &&
+                        !string.Equals(
+                            overrideEntry.Status,
+                            "USER_OVERRIDDEN",
+                            StringComparison.Ordinal))
+                    {
+                        overrideEntry.Status = "USER_OVERRIDDEN";
+                        ledger.Save(ledgerPath);
+                    }
                     continue;
                 }
 
@@ -136,7 +153,8 @@ namespace MediaLibraryEnrichment
             return receipt;
         }
 
-        private List<FilterPresetOperationReceipt> BuildFilterPresetApplyPlan()
+        private List<FilterPresetOperationReceipt> BuildFilterPresetApplyPlan(
+            FilterPresetLedger ledger)
         {
             var operations = new List<FilterPresetOperationReceipt>();
 
@@ -166,20 +184,38 @@ namespace MediaLibraryEnrichment
                     item.Id != spec.PresetId &&
                     string.Equals(item.Name, spec.PresetName, StringComparison.Ordinal));
 
-                if (conflictingPreset != null ||
-                    (preset != null &&
-                     !FilterPresetMatchesDesired(
-                         preset,
-                         spec.PresetName,
-                         spec.CategoryId)))
+                var desiredPresent =
+                    preset != null &&
+                    FilterPresetMatchesDesired(
+                        preset,
+                        spec.PresetName,
+                        spec.CategoryId);
+                var identityConflict =
+                    conflictingPreset != null ||
+                    (preset != null && !desiredPresent);
+                var ledgerEntry = FindFilterPresetLedgerEntry(
+                    ledger,
+                    spec.PresetId.ToString());
+                var decision = FilterPresetEnrichmentPolicy.DecidePresence(
+                    desiredPresent,
+                    identityConflict,
+                    ledgerEntry == null ? null : ledgerEntry.Status);
+
+                if (decision == FilterPresetPresenceDecision.Conflict)
                 {
                     operation.Outcome = "CONFLICT_PRESET_IDENTITY";
                     operation.Detail = "Desired preset name or stable ID is already occupied by different state.";
                 }
-                else if (preset != null)
+                else if (decision == FilterPresetPresenceDecision.Noop)
                 {
                     operation.Outcome = "NOOP";
                     operation.Detail = "Desired native filter preset already exists.";
+                }
+                else if (decision == FilterPresetPresenceDecision.UserOverride)
+                {
+                    operation.Outcome = "USER_OVERRIDE";
+                    operation.Detail =
+                        "Previously managed filter preset is absent outside plugin rollback; preserve the external/user override.";
                 }
                 else
                 {
