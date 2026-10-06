@@ -74,6 +74,7 @@ namespace MediaLibraryEnrichment
         public int CandidateCount { get; set; }
         public int AppliedCount { get; set; }
         public int NoopCount { get; set; }
+        public int UserOverrideCount { get; set; }
         public int ConflictCount { get; set; }
         public int RollbackAppliedCount { get; set; }
         public List<CategoryOperationReceipt> Operations { get; set; } = new List<CategoryOperationReceipt>();
