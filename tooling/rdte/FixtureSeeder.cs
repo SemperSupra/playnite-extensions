@@ -114,6 +114,23 @@ namespace SemperSupraRdteSeeder
 
             if (string.Equals(
                     fixtureProfile,
+                    "r4i-user-filter-preset-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-filter-preset-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-filter-preset-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserFilterPresetOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
                     "r4i-conflict-apply-v1",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(
@@ -957,6 +974,148 @@ namespace SemperSupraRdteSeeder
                     true));
         }
 
+
+        private void RunUserFilterPresetOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-filter-preset-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-filter-preset-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool booksPresetPresent = false;
+            int otherManagedPresets = 0;
+
+            try
+            {
+                var preset =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+
+                if (remove)
+                {
+                    if (preset == null ||
+                        !string.Equals(
+                            preset.Name,
+                            EnrichmentFilterPresetBooksName,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected managed Books filter preset is unavailable before user-override injection.");
+                    }
+
+                    if (!PlayniteApi.Database.FilterPresets.Remove(EnrichmentFilterPresetBooks))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Books filter preset could not be removed through Playnite SDK.");
+                    }
+                }
+                else if (restore && preset == null)
+                {
+                    var category =
+                        PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+                    if (category == null ||
+                        !string.Equals(
+                            category.Name,
+                            EnrichmentCategoryBookName,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Book category is unavailable for Books shelf restoration.");
+                    }
+
+                    PlayniteApi.Database.FilterPresets.Add(new FilterPreset
+                    {
+                        Id = EnrichmentFilterPresetBooks,
+                        Name = EnrichmentFilterPresetBooksName,
+                        Settings = new FilterPresetSettings
+                        {
+                            UseAndFilteringStyle = true,
+                            Category = new IdItemFilterItemProperties(EnrichmentCategoryBook)
+                        },
+                        SortingOrder = SortOrder.Name,
+                        SortingOrderDirection = SortOrderDirection.Ascending,
+                        GroupingOrder = GroupableField.None,
+                        ShowInFullscreeQuickSelection = true
+                    });
+                }
+
+                var verified =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+                var categoryIds =
+                    verified == null ||
+                    verified.Settings == null ||
+                    verified.Settings.Category == null
+                        ? null
+                        : verified.Settings.Category.Ids;
+                booksPresetPresent =
+                    verified != null &&
+                    string.Equals(
+                        verified.Name,
+                        EnrichmentFilterPresetBooksName,
+                        StringComparison.Ordinal) &&
+                    categoryIds != null &&
+                    categoryIds.Count == 1 &&
+                    categoryIds[0] == EnrichmentCategoryBook;
+
+                if (PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetComics) != null)
+                {
+                    otherManagedPresets++;
+                }
+                if (PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetAudio) != null)
+                {
+                    otherManagedPresets++;
+                }
+
+                var expectedBooksPreset = restore;
+                if (booksPresetPresent != expectedBooksPreset)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Books filter preset was not restored for fixture cleanup."
+                            : "User-removed Books filter preset was reasserted.");
+                }
+                if (otherManagedPresets != 2)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed media shelves changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Books filter preset removed through Playnite SDK."
+                    : restore
+                        ? "Managed Books filter preset restored for fixture cleanup."
+                        : "User-removed Books filter preset remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-filter-preset-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-filter-preset-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        preset_id = EnrichmentFilterPresetBooks.ToString(),
+                        preset_name = EnrichmentFilterPresetBooksName,
+                        books_preset_present = booksPresetPresent,
+                        other_managed_presets = otherManagedPresets,
+                        detail = detail
+                    },
+                    true));
+        }
 
         private void RunFilterPresetConflictFixture(
             string dataPath,
