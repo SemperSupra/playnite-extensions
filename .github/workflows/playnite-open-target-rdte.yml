@@ -20,10 +20,17 @@ jobs:
   qualify:
     runs-on: windows-2025
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2]
+    env:
+      RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Qualify Windows default-handler OPEN_TARGET primitive
         shell: pwsh
@@ -35,7 +42,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: open-target-rdte
+          name: open-target-rdte-${{ matrix.rep }}
           path: ${{ runner.temp }}/open-target-rdte
           if-no-files-found: error
           retention-days: 7
