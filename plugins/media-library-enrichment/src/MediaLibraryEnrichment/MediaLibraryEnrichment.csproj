@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>MediaLibraryEnrichment</AssemblyName>
+    <RootNamespace>MediaLibraryEnrichment</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaLibraryEnrichment.Core\MediaLibraryEnrichment.Core.csproj" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462"
+                      Version="1.0.3"
+                      PrivateAssets="All" />
+    <PackageReference Include="PlayniteSDK" Version="6.16.0" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\extension.yaml"
+          Link="extension.yaml"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

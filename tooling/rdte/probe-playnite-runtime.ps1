@@ -10,6 +10,9 @@ param(
 
     [switch]$ExerciseFixtureSeeder,
 
+    [ValidateSet("media-baseline-v1", "media-raw-v1")]
+    [string]$FixtureProfile = "media-baseline-v1",
+
     [int]$StartupTimeoutSeconds = 45
 )
 
@@ -169,7 +172,7 @@ function Wait-ForPlayniteStarted {
         }
         if (Test-Path $LogPath) {
             $text = Get-Content $LogPath -Raw
-            if ($text.Contains($marker)) {
+            if ($null -ne $text -and $text.Contains($marker)) {
                 return $marker
             }
         }
@@ -544,7 +547,11 @@ try {
             throw "Missing positive fixture-seeder plugin-load oracle."
         }
 
-        $seedReceiptPath = Join-Path $userData "ExtensionsData\6d06cf1b-d1e4-4caa-b6c3-cc6026953135\seed-receipt.json"
+        $seederDataPath = Join-Path $userData "ExtensionsData\6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
+        New-Item $seederDataPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $seederDataPath "fixture-profile.txt") -Value $FixtureProfile -Encoding ASCII
+
+        $seedReceiptPath = Join-Path $seederDataPath "seed-receipt.json"
         $deadline = [DateTime]::UtcNow.AddSeconds(15)
         while (-not (Test-Path $seedReceiptPath) -and [DateTime]::UtcNow -lt $deadline) {
             if ($playniteProcess.HasExited) {
@@ -557,8 +564,8 @@ try {
         }
 
         $firstSeed = Get-Content $seedReceiptPath -Raw | ConvertFrom-Json
-        if ($firstSeed.expected_fixture_games -ne 4 -or $firstSeed.observed_fixture_games -ne 4) {
-            throw "Fixture seeder did not create exactly four expected fixture games."
+        if ($firstSeed.expected_fixture_games -ne 5 -or $firstSeed.observed_fixture_games -ne 5) {
+            throw "Fixture seeder did not create exactly five expected fixture games."
         }
         $receipt.fixture_seeder.first_seed = $firstSeed
         Copy-Item $seedReceiptPath (Join-Path $EvidenceDir "seed-first.json") -Force
@@ -582,8 +589,8 @@ try {
         }
 
         $secondSeed = Get-Content $seedReceiptPath -Raw | ConvertFrom-Json
-        if ($secondSeed.expected_fixture_games -ne 4 -or
-            $secondSeed.observed_fixture_games -ne 4 -or
+        if ($secondSeed.expected_fixture_games -ne 5 -or
+            $secondSeed.observed_fixture_games -ne 5 -or
             $secondSeed.total_library_games -ne $firstSeed.total_library_games) {
             throw "Fixture seeder is not idempotent across restart."
         }
