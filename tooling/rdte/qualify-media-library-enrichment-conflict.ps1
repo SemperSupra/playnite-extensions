@@ -37,6 +37,7 @@ if ($desktopExe.Count -ne 1) {
 }
 $desktopExe = $desktopExe[0].FullName
 $logPath = Join-Path $userData "playnite.log"
+$extensionsLogPath = Join-Path $userData "extensions.log"
 $queuePath = Join-Path $userData "extinstalls.json"
 
 $pluginPackages = @(Get-ChildItem $EvidenceDir -Filter "MediaLibraryEnrichment-*.pext" -File)
@@ -1019,9 +1020,12 @@ try {
     if (Test-Path $logPath) {
         Remove-Item $logPath -Force
     }
+    if (Test-Path $extensionsLogPath) {
+        Remove-Item $extensionsLogPath -Force
+    }
     $metadataCleanupProcess = Start-Playnite
     Wait-ForText -Path $logPath -Text "Loaded plugin: $metadataUtilitiesName, version $metadataUtilitiesVersion" -Process $metadataCleanupProcess
-    Wait-ForText -Path $logPath -Text "Removed unused metadata:" -Process $metadataCleanupProcess
+    Wait-ForText -Path $extensionsLogPath -Text "Removed unused metadata:" -Process $metadataCleanupProcess
     $receipt.phases.metadata_utilities_cleanup_execute = "PASS"
     Stop-Playnite
     $metadataCleanupProcess = $null
