@@ -226,6 +226,15 @@ namespace SemperSupraRdteSeeder
 
             if (string.Equals(
                     fixtureProfile,
+                    "open-target-file-activate-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunOpenTargetFileActivationFixture(dataPath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
                     "mle-scale-update-v1",
                     StringComparison.OrdinalIgnoreCase))
             {
@@ -530,6 +539,98 @@ namespace SemperSupraRdteSeeder
                         observed_media_memberships = mediaMemberships,
                         ordinary_manual_membership = ordinaryManualMembership,
                         unused_category_present = unusedCategoryPresent,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunOpenTargetFileActivationFixture(string dataPath)
+        {
+            var result = "PASS";
+            var detail = string.Empty;
+            var targetPath = string.Empty;
+            var actionName = "Read";
+            var actionType = GameActionType.File.ToString();
+            var isPlayAction = false;
+
+            try
+            {
+                var targetConfigPath = Path.Combine(dataPath, "open-target-path.txt");
+                if (!File.Exists(targetConfigPath))
+                {
+                    throw new InvalidOperationException("Open-target path configuration is missing.");
+                }
+
+                targetPath = File.ReadAllText(targetConfigPath).Trim();
+                if (string.IsNullOrWhiteSpace(targetPath))
+                {
+                    throw new InvalidOperationException("Open-target path configuration is empty.");
+                }
+
+                var game = PlayniteApi.Database.Games.Get(GameManualMedia);
+                if (game == null)
+                {
+                    throw new InvalidOperationException("Manual media fixture game is missing.");
+                }
+
+                var action = new GameAction
+                {
+                    Type = GameActionType.File,
+                    Name = actionName,
+                    Path = targetPath,
+                    WorkingDir = Path.GetDirectoryName(targetPath) ?? string.Empty,
+                    Arguments = string.Empty,
+                    IsPlayAction = false,
+                    TrackingMode = TrackingMode.Default
+                };
+
+                var rootProperty = PlayniteApi.GetType().GetProperty("RootApi");
+                var rootApi = rootProperty == null ? null : rootProperty.GetValue(PlayniteApi, null);
+                if (rootApi == null)
+                {
+                    throw new InvalidOperationException("Unable to resolve Playnite RootApi.");
+                }
+
+                var gameEditorField = rootApi.GetType().GetField(
+                    "gameEditor",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic);
+                var gameEditor = gameEditorField == null
+                    ? null
+                    : gameEditorField.GetValue(rootApi);
+                if (gameEditor == null)
+                {
+                    throw new InvalidOperationException("Unable to resolve Playnite GamesEditor.");
+                }
+
+                var activateAction = gameEditor.GetType().GetMethod(
+                    "ActivateAction",
+                    new[] { typeof(Game), typeof(GameAction) });
+                if (activateAction == null)
+                {
+                    throw new InvalidOperationException("Unable to resolve GamesEditor.ActivateAction.");
+                }
+
+                activateAction.Invoke(gameEditor, new object[] { game, action });
+                detail = "Invoked the pinned Playnite non-Play File action path.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.GetBaseException().Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "open-target-invocation-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-open-target-invocation/v1",
+                        result = result,
+                        target_path = targetPath,
+                        action_name = actionName,
+                        action_type = actionType,
+                        is_play_action = isPlayAction,
                         detail = detail
                     },
                     true));
