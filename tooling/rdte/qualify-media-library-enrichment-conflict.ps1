@@ -623,7 +623,10 @@ function Assert-UserFilterPresetOverrideReceipt {
 }
 
 function Assert-UserFilterPresetOverrideReconcile {
-    param([string]$ReceiptPath)
+    param(
+        [string]$ReceiptPath,
+        [string]$LedgerPath
+    )
 
     $reconcile = Get-Content $ReceiptPath -Raw | ConvertFrom-Json
     $books = @($reconcile.Operations | Where-Object {
@@ -633,10 +636,24 @@ function Assert-UserFilterPresetOverrideReconcile {
         $reconcile.CandidateCount -ne 3 -or
         $reconcile.AppliedCount -ne 0 -or
         $reconcile.NoopCount -ne 2 -or
+        $reconcile.UserOverrideCount -ne 1 -or
         $reconcile.ConflictCount -ne 0 -or
         $books.Count -ne 1 -or
         $books[0].Outcome -ne "USER_OVERRIDE") {
         throw "Product reconcile reasserted the user-removed Books shelf or failed to surface it as USER_OVERRIDE."
+    }
+
+    $ledger = Get-Content $LedgerPath -Raw | ConvertFrom-Json
+    $booksOverride = @($ledger.Entries | Where-Object {
+        $_.PresetId -eq "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501" -and
+        $_.Status -eq "USER_OVERRIDDEN"
+    })
+    $stillManaged = @($ledger.Entries | Where-Object {
+        $_.PresetId -ne "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501" -and
+        $_.Status -eq "COMMITTED"
+    })
+    if ($booksOverride.Count -ne 1 -or $stillManaged.Count -ne 2) {
+        throw "FilterPreset ledger did not persist one USER_OVERRIDDEN Books shelf while keeping Comics and Audio COMMITTED."
     }
 
     return $reconcile
@@ -1029,8 +1046,9 @@ try {
     $productProcess = Start-Playnite
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
     Wait-ForFile -Path $filterPresetR4iPath -Process $productProcess
-    $userFilterPresetOverrideReconcile = Assert-UserFilterPresetOverrideReconcile -ReceiptPath $filterPresetR4iPath
+    $userFilterPresetOverrideReconcile = Assert-UserFilterPresetOverrideReconcile -ReceiptPath $filterPresetR4iPath -LedgerPath $filterPresetLedgerPath
     Copy-Item $filterPresetR4iPath (Join-Path $EvidenceDir "user-filter-preset-override-reconcile.json") -Force
+    Copy-Item $filterPresetLedgerPath (Join-Path $EvidenceDir "filter-preset-ledger-after-user-override-reconcile.json") -Force
     $receipt.user_filter_preset_override_reconcile_plan_sha256 =
         $userFilterPresetOverrideReconcile.PlanSha256
     $receipt.phases.user_filter_preset_override_reconcile = "PASS"
