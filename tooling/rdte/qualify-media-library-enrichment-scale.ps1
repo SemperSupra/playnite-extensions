@@ -46,6 +46,20 @@ function Stop-Playnite {
         "--shutdown"
     ) -PassThru
     $stopper.WaitForExit(30000) | Out-Null
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProcessName -like "Playnite.DesktopApp*" -or
+            $_.ProcessName -like "Playnite.FullscreenApp*"
+        })
+        if ($running.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "Playnite did not stop cleanly before timeout."
 }
 
 function Wait-ForText {
