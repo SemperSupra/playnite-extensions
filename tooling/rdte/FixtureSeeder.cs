@@ -537,7 +537,7 @@ namespace SemperSupraRdteSeeder
 
         private void RunScaleUpdateFixture(string dataPath)
         {
-            const int scaleGameCount = 5000;
+            const int scaleGameCount = 10000;
             var result = "PASS";
             var detail = string.Empty;
             var presentCount = 0;

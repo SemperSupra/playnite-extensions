@@ -194,8 +194,8 @@ try {
     $scale = Get-Content $scaleReceiptPath -Raw | ConvertFrom-Json
     if ($scale.schema -ne "sempersupra-playnite-scale-update-fixture/v1" -or
         $scale.result -ne "PASS" -or
-        $scale.scale_game_count -ne 5000 -or
-        $scale.total_library_games -lt 5005) {
+        $scale.scale_game_count -ne 10000 -or
+        $scale.total_library_games -lt 10005) {
         throw "Scale library fixture did not reach the expected state."
     }
     Copy-Item $scaleReceiptPath (Join-Path $EvidenceDir "scale-library-seeded.json") -Force
