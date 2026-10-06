@@ -142,7 +142,7 @@ public static class PlayniteInvoker
 }
 '@
 
-$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework\v4.0.30319\csc.exe"
 if (-not (Test-Path -LiteralPath $csc)) {
     throw "Required .NET Framework compiler is unavailable."
 }
@@ -153,9 +153,9 @@ $invokerCs = Join-Path $work "playnite-invoker.cs"
 $invokerExe = Join-Path $work "playnite-invoker.exe"
 Set-Content -LiteralPath $handlerCs -Value $handlerSource -Encoding UTF8
 Set-Content -LiteralPath $invokerCs -Value $invokerSource -Encoding UTF8
-& $csc /nologo /target:exe /out:$handlerExe $handlerCs
+& $csc /nologo /platform:x86 /target:exe /out:$handlerExe $handlerCs
 if ($LASTEXITCODE -ne 0) { throw "Handler compilation failed." }
-& $csc /nologo /target:exe /out:$invokerExe $invokerCs
+& $csc /nologo /platform:x86 /target:exe /out:$invokerExe $invokerCs
 if ($LASTEXITCODE -ne 0) { throw "Invoker compilation failed." }
 
 $classesRoot = "HKCU:\Software\Classes"
