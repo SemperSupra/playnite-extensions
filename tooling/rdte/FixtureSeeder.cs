@@ -40,6 +40,8 @@ namespace SemperSupraRdteSeeder
         private const string EnrichmentFilterPresetComicsName = "SemperSupra Media: Comics";
         private const string EnrichmentFilterPresetAudioName = "SemperSupra Media: Audio";
         private const string ExternalFilterPresetBooksName = "External Books Shelf";
+        private const string MetadataUtilitiesExternalCategoryName =
+            "RDTE.MetadataUtilities.External";
 
         private static readonly Guid GameBook = Guid.Parse("73000000-0000-4000-8000-000000000001");
         private static readonly Guid GameComic = Guid.Parse("73000000-0000-4000-8000-000000000002");
@@ -198,6 +200,15 @@ namespace SemperSupraRdteSeeder
                 return;
             }
 
+            if (string.Equals(
+                    fixtureProfile,
+                    "metadata-utilities-coexistence-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunMetadataUtilitiesCoexistenceFixture(dataPath);
+                return;
+            }
+
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
             var cbzPath = Path.Combine(fixturePath, "rdte-comic.cbz");
@@ -317,6 +328,88 @@ namespace SemperSupraRdteSeeder
             File.WriteAllText(
                 Path.Combine(dataPath, "seed-receipt.json"),
                 Serialization.ToJson(receipt, true));
+        }
+
+        private void RunMetadataUtilitiesCoexistenceFixture(string dataPath)
+        {
+            string result = "PASS";
+            string detail = string.Empty;
+            string categoryId = string.Empty;
+            int mediaMemberships = 0;
+            bool ordinaryManualMembership = false;
+
+            try
+            {
+                var category = PlayniteApi.Database.Categories.FirstOrDefault(item =>
+                    string.Equals(
+                        item.Name,
+                        MetadataUtilitiesExternalCategoryName,
+                        StringComparison.Ordinal));
+                if (category == null)
+                {
+                    throw new InvalidOperationException(
+                        "Metadata Utilities external category is absent.");
+                }
+
+                categoryId = category.Id.ToString();
+                foreach (var gameId in new[]
+                {
+                    GameBook,
+                    GameComic,
+                    GameAudio,
+                    GameManualMedia
+                })
+                {
+                    var game = PlayniteApi.Database.Games.Get(gameId);
+                    if (game == null ||
+                        game.CategoryIds == null ||
+                        !game.CategoryIds.Contains(category.Id))
+                    {
+                        throw new InvalidOperationException(
+                            "Metadata Utilities external category is absent from media fixture " +
+                            gameId + ".");
+                    }
+                    mediaMemberships++;
+                }
+
+                var ordinaryManual = PlayniteApi.Database.Games.Get(GameManual);
+                ordinaryManualMembership =
+                    ordinaryManual != null &&
+                    ordinaryManual.CategoryIds != null &&
+                    ordinaryManual.CategoryIds.Contains(category.Id);
+                if (ordinaryManualMembership)
+                {
+                    throw new InvalidOperationException(
+                        "Metadata Utilities coexistence action unexpectedly mutated the ordinary manual control.");
+                }
+
+                detail =
+                    "Third-party Metadata Utilities category is present on all four media fixtures and absent from the ordinary manual control.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(
+                    dataPath,
+                    "metadata-utilities-coexistence-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema =
+                            "sempersupra-playnite-metadata-utilities-coexistence-fixture/v1",
+                        result = result,
+                        category_id = categoryId,
+                        category_name = MetadataUtilitiesExternalCategoryName,
+                        expected_media_memberships = 4,
+                        observed_media_memberships = mediaMemberships,
+                        ordinary_manual_membership = ordinaryManualMembership,
+                        detail = detail
+                    },
+                    true));
         }
 
         private void RunNativePersistenceFixture(
