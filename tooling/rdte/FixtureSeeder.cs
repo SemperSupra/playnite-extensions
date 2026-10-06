@@ -345,61 +345,79 @@ namespace SemperSupraRdteSeeder
                 Serialization.ToJson(receipt, true));
         }
 
-        private void RunMetadataUtilitiesCoexistenceFixture(string dataPath)
+        private void RunMetadataUtilitiesCoexistenceSeedFixture(string dataPath)
         {
-            string result = "PASS";
-            string detail = string.Empty;
-            string categoryId = string.Empty;
-            int mediaMemberships = 0;
-            bool ordinaryManualMembership = false;
+            var result = "PASS";
+            var detail = string.Empty;
+            var mediaMemberships = 0;
+            var ordinaryManualMembership = false;
 
             try
             {
-                var category = PlayniteApi.Database.Categories.FirstOrDefault(item =>
-                    string.Equals(
-                        item.Name,
-                        MetadataUtilitiesExternalCategoryName,
-                        StringComparison.Ordinal));
-                if (category == null)
+                using (PlayniteApi.Database.BufferedUpdate())
                 {
-                    throw new InvalidOperationException(
-                        "Metadata Utilities external category is absent.");
+                    EnsureMetadata(
+                        PlayniteApi.Database.Categories,
+                        new Category
+                        {
+                            Id = MetadataUtilitiesExternalCategory,
+                            Name = MetadataUtilitiesExternalCategoryName
+                        });
+                    EnsureMetadata(
+                        PlayniteApi.Database.Categories,
+                        new Category
+                        {
+                            Id = MetadataUtilitiesUnusedCategory,
+                            Name = MetadataUtilitiesUnusedCategoryName
+                        });
+
+                    foreach (var gameId in new[] { GameBook, GameComic, GameAudio, GameManualMedia })
+                    {
+                        var game = PlayniteApi.Database.Games.Get(gameId);
+                        if (game == null)
+                        {
+                            throw new InvalidOperationException(
+                                "Media fixture unavailable for coexistence seed: " + gameId + ".");
+                        }
+
+                        var categories = game.CategoryIds == null
+                            ? new List<Guid>()
+                            : new List<Guid>(game.CategoryIds);
+                        if (!categories.Contains(MetadataUtilitiesExternalCategory))
+                        {
+                            categories.Add(MetadataUtilitiesExternalCategory);
+                            game.CategoryIds = categories;
+                            PlayniteApi.Database.Games.Update(game);
+                        }
+                    }
                 }
 
-                categoryId = category.Id.ToString();
-                foreach (var gameId in new[]
-                {
-                    GameBook,
-                    GameComic,
-                    GameAudio,
-                    GameManualMedia
-                })
+                foreach (var gameId in new[] { GameBook, GameComic, GameAudio, GameManualMedia })
                 {
                     var game = PlayniteApi.Database.Games.Get(gameId);
-                    if (game == null ||
-                        game.CategoryIds == null ||
-                        !game.CategoryIds.Contains(category.Id))
+                    if (game != null &&
+                        game.CategoryIds != null &&
+                        game.CategoryIds.Contains(MetadataUtilitiesExternalCategory))
                     {
-                        throw new InvalidOperationException(
-                            "Metadata Utilities external category is absent from media fixture " +
-                            gameId + ".");
+                        mediaMemberships++;
                     }
-                    mediaMemberships++;
                 }
 
                 var ordinaryManual = PlayniteApi.Database.Games.Get(GameManual);
                 ordinaryManualMembership =
                     ordinaryManual != null &&
                     ordinaryManual.CategoryIds != null &&
-                    ordinaryManual.CategoryIds.Contains(category.Id);
-                if (ordinaryManualMembership)
+                    ordinaryManual.CategoryIds.Contains(MetadataUtilitiesExternalCategory);
+
+                if (mediaMemberships != 4 ||
+                    ordinaryManualMembership ||
+                    PlayniteApi.Database.Categories.Get(MetadataUtilitiesUnusedCategory) == null)
                 {
                     throw new InvalidOperationException(
-                        "Metadata Utilities coexistence action unexpectedly mutated the ordinary manual control.");
+                        "Coexistence seed did not create the expected used and unused category state.");
                 }
 
-                detail =
-                    "Third-party Metadata Utilities category is present on all four media fixtures and absent from the ordinary manual control.";
+                detail = "Seeded a used external category and an unused external category.";
             }
             catch (Exception exception)
             {
@@ -408,20 +426,101 @@ namespace SemperSupraRdteSeeder
             }
 
             File.WriteAllText(
-                Path.Combine(
-                    dataPath,
-                    "metadata-utilities-coexistence-receipt.json"),
+                Path.Combine(dataPath, "metadata-utilities-coexistence-seed-receipt.json"),
                 Serialization.ToJson(
                     new
                     {
-                        schema =
-                            "sempersupra-playnite-metadata-utilities-coexistence-fixture/v1",
+                        schema = "sempersupra-playnite-metadata-utilities-coexistence-seed/v1",
                         result = result,
-                        category_id = categoryId,
-                        category_name = MetadataUtilitiesExternalCategoryName,
+                        external_category_id = MetadataUtilitiesExternalCategory.ToString(),
+                        external_category_name = MetadataUtilitiesExternalCategoryName,
+                        unused_category_id = MetadataUtilitiesUnusedCategory.ToString(),
+                        unused_category_name = MetadataUtilitiesUnusedCategoryName,
+                        media_memberships = mediaMemberships,
+                        ordinary_manual_membership = ordinaryManualMembership,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunMetadataUtilitiesCoexistenceVerifyFixture(string dataPath)
+        {
+            var result = "PASS";
+            var detail = string.Empty;
+            var mediaMemberships = 0;
+            var ordinaryManualMembership = false;
+            var unusedCategoryPresent = false;
+
+            try
+            {
+                var category =
+                    PlayniteApi.Database.Categories.Get(MetadataUtilitiesExternalCategory);
+                if (category == null ||
+                    !string.Equals(
+                        category.Name,
+                        MetadataUtilitiesExternalCategoryName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected used external category is absent or renamed.");
+                }
+
+                foreach (var gameId in new[] { GameBook, GameComic, GameAudio, GameManualMedia })
+                {
+                    var game = PlayniteApi.Database.Games.Get(gameId);
+                    if (game == null ||
+                        game.CategoryIds == null ||
+                        !game.CategoryIds.Contains(MetadataUtilitiesExternalCategory))
+                    {
+                        throw new InvalidOperationException(
+                            "Used external category missing from media fixture " + gameId + ".");
+                    }
+                    mediaMemberships++;
+                }
+
+                var ordinaryManual = PlayniteApi.Database.Games.Get(GameManual);
+                ordinaryManualMembership =
+                    ordinaryManual != null &&
+                    ordinaryManual.CategoryIds != null &&
+                    ordinaryManual.CategoryIds.Contains(MetadataUtilitiesExternalCategory);
+                if (ordinaryManualMembership)
+                {
+                    throw new InvalidOperationException(
+                        "Used external category leaked onto the ordinary manual control.");
+                }
+
+                unusedCategoryPresent =
+                    PlayniteApi.Database.Categories.Get(MetadataUtilitiesUnusedCategory) != null;
+                if (unusedCategoryPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Metadata Utilities did not clean the seeded unused category.");
+                }
+
+                detail =
+                    "Unused external category is gone while the used external category remains on all media fixtures.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "metadata-utilities-coexistence-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-metadata-utilities-coexistence-fixture/v2",
+                        result = result,
+                        external_category_id = MetadataUtilitiesExternalCategory.ToString(),
+                        external_category_name = MetadataUtilitiesExternalCategoryName,
+                        unused_category_id = MetadataUtilitiesUnusedCategory.ToString(),
+                        unused_category_name = MetadataUtilitiesUnusedCategoryName,
                         expected_media_memberships = 4,
                         observed_media_memberships = mediaMemberships,
                         ordinary_manual_membership = ordinaryManualMembership,
+                        unused_category_present = unusedCategoryPresent,
                         detail = detail
                     },
                     true));
