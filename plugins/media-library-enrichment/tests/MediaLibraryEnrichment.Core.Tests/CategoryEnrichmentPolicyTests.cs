@@ -30,5 +30,38 @@ namespace MediaLibraryEnrichment.Core.Tests
         {
             Assert.Null(CategoryEnrichmentPolicy.ForKind(kind));
         }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("PLANNED")]
+        [InlineData("ROLLED_BACK")]
+        public void MissingMembershipWithoutCommittedOwnershipIsAddable(string status)
+        {
+            Assert.Equal(
+                CategoryMembershipDecision.AddMembership,
+                CategoryEnrichmentPolicy.DecideMembership(false, status));
+        }
+
+        [Theory]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void MissingPreviouslyCommittedMembershipIsAUserOverride(string status)
+        {
+            Assert.Equal(
+                CategoryMembershipDecision.UserOverride,
+                CategoryEnrichmentPolicy.DecideMembership(false, status));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("COMMITTED")]
+        [InlineData("USER_OVERRIDDEN")]
+        public void ExistingMembershipIsAlwaysANoop(string status)
+        {
+            Assert.Equal(
+                CategoryMembershipDecision.Noop,
+                CategoryEnrichmentPolicy.DecideMembership(true, status));
+        }
     }
 }
