@@ -1,9 +1,12 @@
+using System;
+
 namespace MediaLibraryEnrichment
 {
     public enum CoverPlanDecision
     {
         Add,
         Noop,
+        UserOverride,
         ConflictEvidence,
         ConflictCoverPresent
     }
@@ -13,21 +16,34 @@ namespace MediaLibraryEnrichment
         public static CoverPlanDecision Decide(
             bool evidenceValid,
             bool hasCurrentCover,
-            bool currentMatchesOwnedCover)
+            bool currentMatchesOwnedCover,
+            string ledgerStatus)
         {
             if (!evidenceValid)
             {
                 return CoverPlanDecision.ConflictEvidence;
             }
 
-            if (!hasCurrentCover)
+            if (hasCurrentCover)
             {
-                return CoverPlanDecision.Add;
+                return currentMatchesOwnedCover
+                    ? CoverPlanDecision.Noop
+                    : CoverPlanDecision.ConflictCoverPresent;
             }
 
-            return currentMatchesOwnedCover
-                ? CoverPlanDecision.Noop
-                : CoverPlanDecision.ConflictCoverPresent;
+            if (string.Equals(
+                    ledgerStatus,
+                    "COMMITTED",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    ledgerStatus,
+                    "USER_OVERRIDDEN",
+                    StringComparison.Ordinal))
+            {
+                return CoverPlanDecision.UserOverride;
+            }
+
+            return CoverPlanDecision.Add;
         }
     }
 }
