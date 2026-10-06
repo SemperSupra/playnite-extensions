@@ -103,15 +103,15 @@ function Find-InstalledExtension {
 
 function Queue-Install {
     param([string]$PackagePath)
-    @([ordered]@{ InstallType = 0; Path = $PackagePath }) |
-        ConvertTo-Json -Depth 4 |
+    $queue = @([ordered]@{ InstallType = 0; Path = $PackagePath })
+    ConvertTo-Json -InputObject $queue -Depth 4 |
         Set-Content -Path $queuePath -Encoding UTF8
 }
 
 function Queue-Uninstall {
     param([string]$InstalledDir)
-    @([ordered]@{ InstallType = 1; Path = $InstalledDir }) |
-        ConvertTo-Json -Depth 4 |
+    $queue = @([ordered]@{ InstallType = 1; Path = $InstalledDir })
+    ConvertTo-Json -InputObject $queue -Depth 4 |
         Set-Content -Path $queuePath -Encoding UTF8
 }
 
