@@ -224,6 +224,15 @@ namespace SemperSupraRdteSeeder
                 return;
             }
 
+            if (string.Equals(
+                    fixtureProfile,
+                    "mle-scale-update-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunScaleUpdateFixture(dataPath);
+                return;
+            }
+
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
             var cbzPath = Path.Combine(fixturePath, "rdte-comic.cbz");
