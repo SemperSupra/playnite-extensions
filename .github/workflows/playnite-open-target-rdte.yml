@@ -1,0 +1,41 @@
+name: OPEN_TARGET Windows RDTE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - candidate/open-target-rdte
+    paths:
+      - "tooling/rdte/qualify-open-target.ps1"
+      - ".github/workflows/playnite-open-target-rdte.yml"
+  pull_request:
+    paths:
+      - "tooling/rdte/qualify-open-target.ps1"
+      - ".github/workflows/playnite-open-target-rdte.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Qualify Windows default-handler OPEN_TARGET primitive
+        shell: pwsh
+        run: |
+          ./tooling/rdte/qualify-open-target.ps1 `
+            -EvidenceDir (Join-Path $env:RUNNER_TEMP "open-target-rdte")
+
+      - name: Upload OPEN_TARGET evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: open-target-rdte
+          path: ${{ runner.temp }}/open-target-rdte
+          if-no-files-found: error
+          retention-days: 7
