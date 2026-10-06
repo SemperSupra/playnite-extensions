@@ -31,6 +31,11 @@ namespace MediaLibraryEnrichment
 
         public override void OnApplicationStarted(OnApplicationStartedEventArgs args)
         {
+            RunReconciliation();
+        }
+
+        private void RunReconciliation()
+        {
             var dataPath = GetPluginUserDataPath();
             Directory.CreateDirectory(dataPath);
 
