@@ -7,6 +7,7 @@ on:
       - candidate/open-target-rdte
     paths:
       - "tooling/rdte/qualify-open-target.ps1"
+      - "tooling/rdte/qualify-playnite-open-target.ps1"
       - ".github/workflows/playnite-open-target-rdte.yml"
   pull_request:
     paths:
@@ -36,6 +37,12 @@ jobs:
         shell: pwsh
         run: |
           ./tooling/rdte/qualify-open-target.ps1 `
+            -EvidenceDir (Join-Path $env:RUNNER_TEMP "open-target-rdte")
+
+      - name: Qualify Playnite 10.62 native target dispatch
+        shell: pwsh
+        run: |
+          ./tooling/rdte/qualify-playnite-open-target.ps1 `
             -EvidenceDir (Join-Path $env:RUNNER_TEMP "open-target-rdte")
 
       - name: Upload OPEN_TARGET evidence
