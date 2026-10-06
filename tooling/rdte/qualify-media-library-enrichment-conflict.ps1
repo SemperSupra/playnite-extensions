@@ -643,7 +643,10 @@ function Assert-UserCoverOverrideReceipt {
 }
 
 function Assert-UserCoverOverrideReconcile {
-    param([string]$ReceiptPath)
+    param(
+        [string]$ReceiptPath,
+        [string]$LedgerPath
+    )
 
     $reconcile = Get-Content $ReceiptPath -Raw | ConvertFrom-Json
     $book = @($reconcile.Operations | Where-Object {
@@ -654,10 +657,26 @@ function Assert-UserCoverOverrideReconcile {
         $reconcile.CandidateCount -ne 2 -or
         $reconcile.AppliedCount -ne 0 -or
         $reconcile.NoopCount -ne 1 -or
+        $reconcile.UserOverrideCount -ne 1 -or
         $reconcile.ConflictCount -ne 0 -or
         $book.Count -ne 1 -or
         $book[0].Outcome -ne "USER_OVERRIDE") {
         throw "Product reconcile reasserted the user-cleared Ebook cover or failed to surface it as USER_OVERRIDE."
+    }
+
+    $ledger = Get-Content $LedgerPath -Raw | ConvertFrom-Json
+    $bookOverride = @($ledger.Entries | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000001" -and
+        $_.EvidenceKey -eq "rdte-book-cover-v1" -and
+        $_.Status -eq "USER_OVERRIDDEN"
+    })
+    $comicManaged = @($ledger.Entries | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000002" -and
+        $_.EvidenceKey -eq "rdte-comic-cover-v1" -and
+        $_.Status -eq "COMMITTED"
+    })
+    if ($bookOverride.Count -ne 1 -or $comicManaged.Count -ne 1) {
+        throw "Cover ledger did not persist the Ebook as USER_OVERRIDDEN while keeping the Comic cover COMMITTED."
     }
 
     return $reconcile
@@ -1142,8 +1161,9 @@ try {
     $productProcess = Start-Playnite
     Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
     Wait-ForFile -Path $coverR4iPath -Process $productProcess
-    $userCoverOverrideReconcile = Assert-UserCoverOverrideReconcile -ReceiptPath $coverR4iPath
+    $userCoverOverrideReconcile = Assert-UserCoverOverrideReconcile -ReceiptPath $coverR4iPath -LedgerPath $coverLedgerPath
     Copy-Item $coverR4iPath (Join-Path $EvidenceDir "user-cover-override-reconcile.json") -Force
+    Copy-Item $coverLedgerPath (Join-Path $EvidenceDir "cover-ledger-after-user-override.json") -Force
     $receipt.user_cover_override_reconcile_plan_sha256 =
         $userCoverOverrideReconcile.PlanSha256
     $receipt.phases.user_cover_override_reconcile = "PASS"
