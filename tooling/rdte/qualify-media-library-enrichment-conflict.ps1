@@ -622,6 +622,47 @@ function Assert-UserFilterPresetOverrideReceipt {
     return $value
 }
 
+function Assert-UserCoverOverrideReceipt {
+    param(
+        [string]$Path,
+        [ValidateSet("remove", "verify", "restore")][string]$ExpectedMode
+    )
+
+    $value = Get-Content $Path -Raw | ConvertFrom-Json
+    $expectedBookCover = $ExpectedMode -eq "restore"
+    if ($value.schema -ne "sempersupra-playnite-user-cover-override-fixture/v1" -or
+        $value.mode -ne $ExpectedMode -or
+        $value.result -ne "PASS" -or
+        $value.book_game_id -ne "73000000-0000-4000-8000-000000000001" -or
+        $value.book_cover_present -ne $expectedBookCover -or
+        $value.comic_cover_present -ne $true) {
+        throw "Fixture seeder did not prove '$ExpectedMode' user-cover override state."
+    }
+
+    return $value
+}
+
+function Assert-UserCoverOverrideReconcile {
+    param([string]$ReceiptPath)
+
+    $reconcile = Get-Content $ReceiptPath -Raw | ConvertFrom-Json
+    $book = @($reconcile.Operations | Where-Object {
+        $_.PlayniteId -eq "73000000-0000-4000-8000-000000000001" -and
+        $_.EvidenceKey -eq "rdte-book-cover-v1"
+    })
+    if ($reconcile.Mode -ne "apply" -or
+        $reconcile.CandidateCount -ne 2 -or
+        $reconcile.AppliedCount -ne 0 -or
+        $reconcile.NoopCount -ne 1 -or
+        $reconcile.ConflictCount -ne 0 -or
+        $book.Count -ne 1 -or
+        $book[0].Outcome -ne "USER_OVERRIDE") {
+        throw "Product reconcile reasserted the user-cleared Ebook cover or failed to surface it as USER_OVERRIDE."
+    }
+
+    return $reconcile
+}
+
 function Assert-UserFilterPresetOverrideReconcile {
     param(
         [string]$ReceiptPath,
@@ -762,6 +803,10 @@ $receipt = [ordered]@{
         user_filter_preset_override_reconcile = "NOT_RUN"
         user_filter_preset_override_verify = "NOT_RUN"
         user_filter_preset_override_restore = "NOT_RUN"
+        user_cover_override_remove = "NOT_RUN"
+        user_cover_override_reconcile = "NOT_RUN"
+        user_cover_override_verify = "NOT_RUN"
+        user_cover_override_restore = "NOT_RUN"
         external_conflict_inject = "NOT_RUN"
         conflict_rollback = "NOT_RUN"
         external_conflict_verify = "NOT_RUN"
@@ -1073,6 +1118,56 @@ try {
     Stop-Playnite
     Native-Uninstall -InstalledDir $userFilterPresetOverrideRestoreSeeder.InstalledDir
     Copy-Item $filterPresetLedgerBackup $filterPresetLedgerPath -Force
+
+    # Continue release gate #4 with complete external clearing of the managed
+    # Ebook CoverImage. Falsify integrated product behavior before repair.
+    $coverLedgerPath = Join-Path $userData "ExtensionsData\$pluginId\cover-ledger.json"
+    $coverLedgerBackup = Join-Path $EvidenceDir "cover-ledger-before-user-override.json"
+    Copy-Item $coverLedgerPath $coverLedgerBackup -Force
+
+    Set-ProductMode -Mode "observe"
+    $userCoverOverridePath = Join-Path $seederData "user-cover-override-receipt.json"
+    Set-Content -Path $profilePath -Value "r4i-user-cover-override-remove-v1" -Encoding UTF8
+    if (Test-Path $userCoverOverridePath) { Remove-Item $userCoverOverridePath -Force }
+    $userCoverOverrideSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userCoverOverridePath
+    Assert-UserCoverOverrideReceipt -Path $userCoverOverridePath -ExpectedMode "remove" | Out-Null
+    Copy-Item $userCoverOverridePath (Join-Path $EvidenceDir "user-cover-override-removed.json") -Force
+    $receipt.phases.user_cover_override_remove = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userCoverOverrideSeeder.InstalledDir
+
+    Set-ProductMode -Mode "apply"
+    if (Test-Path $coverR4iPath) { Remove-Item $coverR4iPath -Force }
+    if (Test-Path $logPath) { Remove-Item $logPath -Force }
+    $productProcess = Start-Playnite
+    Wait-ForText -Path $logPath -Text "Loaded plugin: $pluginName, version $productVersion" -Process $productProcess
+    Wait-ForFile -Path $coverR4iPath -Process $productProcess
+    $userCoverOverrideReconcile = Assert-UserCoverOverrideReconcile -ReceiptPath $coverR4iPath
+    Copy-Item $coverR4iPath (Join-Path $EvidenceDir "user-cover-override-reconcile.json") -Force
+    $receipt.user_cover_override_reconcile_plan_sha256 =
+        $userCoverOverrideReconcile.PlanSha256
+    $receipt.phases.user_cover_override_reconcile = "PASS"
+    Stop-Playnite
+    $productProcess = $null
+
+    Set-ProductMode -Mode "observe"
+    Set-Content -Path $profilePath -Value "r4i-user-cover-override-verify-v1" -Encoding UTF8
+    if (Test-Path $userCoverOverridePath) { Remove-Item $userCoverOverridePath -Force }
+    $userCoverOverrideVerifySeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userCoverOverridePath
+    Assert-UserCoverOverrideReceipt -Path $userCoverOverridePath -ExpectedMode "verify" | Out-Null
+    Copy-Item $userCoverOverridePath (Join-Path $EvidenceDir "user-cover-override-verified.json") -Force
+    $receipt.phases.user_cover_override_verify = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userCoverOverrideVerifySeeder.InstalledDir
+
+    Set-Content -Path $profilePath -Value "r4i-user-cover-override-restore-v1" -Encoding UTF8
+    if (Test-Path $userCoverOverridePath) { Remove-Item $userCoverOverridePath -Force }
+    $userCoverOverrideRestoreSeeder = Native-InstallAndRun -PackagePath $seederPackage -ExpectedId $seederId -ExpectedName $seederName -ExpectedVersion $seederVersion -ReadyFile $userCoverOverridePath
+    Assert-UserCoverOverrideReceipt -Path $userCoverOverridePath -ExpectedMode "restore" | Out-Null
+    $receipt.phases.user_cover_override_restore = "PASS"
+    Stop-Playnite
+    Native-Uninstall -InstalledDir $userCoverOverrideRestoreSeeder.InstalledDir
+    Copy-Item $coverLedgerBackup $coverLedgerPath -Force
 
     Set-ProductMode -Mode "observe"
 
