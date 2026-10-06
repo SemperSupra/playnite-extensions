@@ -11,6 +11,14 @@ namespace MediaLibraryEnrichment
         public string CategoryName { get; set; }
     }
 
+    public enum FilterPresetPresenceDecision
+    {
+        Noop,
+        Conflict,
+        AddPreset,
+        UserOverride
+    }
+
     public static class FilterPresetEnrichmentPolicy
     {
         private static readonly FilterPresetEnrichmentSpec Books =
@@ -42,6 +50,36 @@ namespace MediaLibraryEnrichment
                 CategoryId = Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1403"),
                 CategoryName = "SemperSupra.Media:Audio"
             };
+
+        public static FilterPresetPresenceDecision DecidePresence(
+            bool desiredPresent,
+            bool identityConflict,
+            string ledgerStatus)
+        {
+            if (desiredPresent)
+            {
+                return FilterPresetPresenceDecision.Noop;
+            }
+
+            if (identityConflict)
+            {
+                return FilterPresetPresenceDecision.Conflict;
+            }
+
+            if (string.Equals(
+                    ledgerStatus,
+                    "COMMITTED",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    ledgerStatus,
+                    "USER_OVERRIDDEN",
+                    StringComparison.Ordinal))
+            {
+                return FilterPresetPresenceDecision.UserOverride;
+            }
+
+            return FilterPresetPresenceDecision.AddPreset;
+        }
 
         public static FilterPresetEnrichmentSpec ForKind(string kind)
         {
