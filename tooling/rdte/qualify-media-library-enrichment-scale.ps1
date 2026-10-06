@@ -152,8 +152,26 @@ $receipt = [ordered]@{
     result = "RUNNING"
 }
 
+function Wait-ForPlayniteQuiescence {
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProcessName -like "Playnite.DesktopApp*" -or
+            $_.ProcessName -like "Playnite.FullscreenApp*" -or
+            $_.ProcessName -like "Playnite.BrowserProcess*"
+        })
+        if ($running.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "Playnite runtime was not quiescent before scale qualification."
+}
+
 $productProcess = $null
 try {
+    Wait-ForPlayniteQuiescence
     $productReceipt = Get-Content (Join-Path $EvidenceDir "receipt.json") -Raw | ConvertFrom-Json
     $productVersion = $productReceipt.version
 
