@@ -1,0 +1,59 @@
+name: Playnite Open Target Native RDTE
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/playnite-open-target-rdte.yml"
+      - "tooling/rdte/FixtureSeeder.cs"
+      - "tooling/rdte/qualify-playnite-open-target.ps1"
+      - "tooling/rdte/probe-playnite-runtime.ps1"
+      - "tooling/rdte/playnite-10.62.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Qualify native non-Play default-handler dispatch
+        env:
+          RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "playnite-open-target-rdte"
+          $runtimeEvidence = Join-Path $evidence "runtime"
+
+          ./tooling/rdte/probe-playnite-runtime.ps1 `
+            -ManifestPath ./tooling/rdte/playnite-10.62.json `
+            -EvidenceDir $runtimeEvidence `
+            -ExerciseFixtureSeeder `
+            -FixtureProfile media-raw-v1
+
+          $workRoots = @(
+            Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
+              Sort-Object LastWriteTimeUtc -Descending
+          )
+          if ($workRoots.Count -lt 1) {
+            throw "Unable to locate the disposable Playnite work root."
+          }
+
+          ./tooling/rdte/qualify-playnite-open-target.ps1 `
+            -WorkRoot $workRoots[0].FullName `
+            -EvidenceDir (Join-Path $evidence "open-target")
+
+      - name: Upload OPEN_TARGET RDTE evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: playnite-open-target-rdte-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/playnite-open-target-rdte
+          if-no-files-found: error
+          retention-days: 7
