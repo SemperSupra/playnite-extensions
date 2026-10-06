@@ -237,7 +237,7 @@ namespace MediaLibraryEnrichment
             CategoryLedger ledger,
             string ledgerPath)
         {
-            var operations = BuildApplyPlan(candidates);
+            var operations = BuildApplyPlan(candidates, ledger);
             var receipt = new CategoryReconcileReceipt
             {
                 Mode = "apply",
@@ -252,6 +252,25 @@ namespace MediaLibraryEnrichment
                 {
                     receipt.NoopCount++;
                     CommitRecoveredLedgerIfNeeded(operation, ledger, ledgerPath);
+                    continue;
+                }
+
+                if (string.Equals(operation.Outcome, "USER_OVERRIDE", StringComparison.Ordinal))
+                {
+                    receipt.UserOverrideCount++;
+                    var overrideEntry = FindLedgerEntry(
+                        ledger,
+                        operation.PlayniteId,
+                        operation.CategoryId);
+                    if (overrideEntry != null &&
+                        !string.Equals(
+                            overrideEntry.Status,
+                            "USER_OVERRIDDEN",
+                            StringComparison.Ordinal))
+                    {
+                        overrideEntry.Status = "USER_OVERRIDDEN";
+                        ledger.Save(ledgerPath);
+                    }
                     continue;
                 }
 
@@ -372,7 +391,9 @@ namespace MediaLibraryEnrichment
             return receipt;
         }
 
-        private List<CategoryOperationReceipt> BuildApplyPlan(MediaObservation[] candidates)
+        private List<CategoryOperationReceipt> BuildApplyPlan(
+            MediaObservation[] candidates,
+            CategoryLedger ledger)
         {
             var operations = new List<CategoryOperationReceipt>();
 
@@ -431,13 +452,30 @@ namespace MediaLibraryEnrichment
                 var membershipPresent =
                     game.CategoryIds != null &&
                     game.CategoryIds.Contains(spec.CategoryId);
+                var ledgerEntry = FindLedgerEntry(
+                    ledger,
+                    candidate.PlayniteId,
+                    spec.CategoryId.ToString());
+                var decision = CategoryEnrichmentPolicy.DecideMembership(
+                    membershipPresent,
+                    ledgerEntry == null ? null : ledgerEntry.Status);
 
-                operation.Outcome = membershipPresent
-                    ? "NOOP"
-                    : "ADD_MEMBERSHIP";
-                operation.Detail = membershipPresent
-                    ? "Desired membership already present."
-                    : "Missing owned category membership.";
+                if (decision == CategoryMembershipDecision.Noop)
+                {
+                    operation.Outcome = "NOOP";
+                    operation.Detail = "Desired membership already present.";
+                }
+                else if (decision == CategoryMembershipDecision.UserOverride)
+                {
+                    operation.Outcome = "USER_OVERRIDE";
+                    operation.Detail =
+                        "Previously managed membership is absent outside plugin rollback; preserve the external/user override.";
+                }
+                else
+                {
+                    operation.Outcome = "ADD_MEMBERSHIP";
+                    operation.Detail = "Missing owned category membership.";
+                }
                 operations.Add(operation);
             }
 
