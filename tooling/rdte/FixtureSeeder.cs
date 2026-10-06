@@ -97,6 +97,23 @@ namespace SemperSupraRdteSeeder
 
             if (string.Equals(
                     fixtureProfile,
+                    "r4i-user-action-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-action-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-action-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserActionOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
                     "r4i-conflict-apply-v1",
                     StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(
@@ -582,6 +599,150 @@ namespace SemperSupraRdteSeeder
                         detail = detail
                     },
                     true));
+        }
+
+        private void RunUserActionOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-action-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-action-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool bookActionPresent = false;
+            int otherManagedActions = 0;
+
+            try
+            {
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (game == null)
+                {
+                    throw new InvalidOperationException("Humble Ebook fixture is unavailable.");
+                }
+
+                var evidencePath = game.Manual ?? string.Empty;
+                var workingDir = Path.GetDirectoryName(evidencePath) ?? string.Empty;
+                Func<GameAction, bool> matchesManagedRead = action =>
+                    action != null &&
+                    action.Type == GameActionType.File &&
+                    !action.IsPlayAction &&
+                    string.Equals(action.Name, "Read", StringComparison.Ordinal) &&
+                    string.Equals(action.Path, evidencePath, StringComparison.Ordinal) &&
+                    string.Equals(action.WorkingDir ?? string.Empty, workingDir, StringComparison.Ordinal) &&
+                    string.IsNullOrEmpty(action.Arguments);
+
+                var actions = game.GameActions == null
+                    ? new List<GameAction>()
+                    : new List<GameAction>(game.GameActions);
+                var managedReads = actions.Where(matchesManagedRead).ToList();
+
+                if (remove)
+                {
+                    if (managedReads.Count != 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected exactly one managed Ebook Read action before user-override injection.");
+                    }
+
+                    actions.Remove(managedReads[0]);
+                    game.GameActions = new System.Collections.ObjectModel.ObservableCollection<GameAction>(actions);
+                    PlayniteApi.Database.Games.Update(game);
+                }
+                else if (restore && managedReads.Count == 0)
+                {
+                    actions.Add(new GameAction
+                    {
+                        Type = GameActionType.File,
+                        Name = "Read",
+                        Path = evidencePath,
+                        WorkingDir = workingDir,
+                        Arguments = string.Empty,
+                        IsPlayAction = false,
+                        TrackingMode = TrackingMode.Default
+                    });
+                    game.GameActions = new System.Collections.ObjectModel.ObservableCollection<GameAction>(actions);
+                    PlayniteApi.Database.Games.Update(game);
+                }
+
+                var verifiedBook = PlayniteApi.Database.Games.Get(GameBook);
+                bookActionPresent =
+                    verifiedBook != null &&
+                    verifiedBook.GameActions != null &&
+                    verifiedBook.GameActions.Any(matchesManagedRead);
+
+                var comic = PlayniteApi.Database.Games.Get(GameComic);
+                var audio = PlayniteApi.Database.Games.Get(GameAudio);
+                var manualMedia = PlayniteApi.Database.Games.Get(GameManualMedia);
+
+                if (HasManagedAction(comic, "Read")) otherManagedActions++;
+                if (HasManagedAction(audio, "Listen")) otherManagedActions++;
+                if (HasManagedAction(manualMedia, "Read")) otherManagedActions++;
+
+                var expectedBookAction = restore;
+                if (bookActionPresent != expectedBookAction)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Ebook Read action was not restored for fixture cleanup."
+                            : "User-removed Ebook Read action was reasserted.");
+                }
+                if (otherManagedActions != 3)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed custom actions changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Ebook Read action removed through Playnite SDK."
+                    : restore
+                        ? "Managed Ebook Read action restored for fixture cleanup."
+                        : "User-removed Ebook Read action remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-action-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-action-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        action_name = "Read",
+                        book_action_present = bookActionPresent,
+                        other_managed_actions = otherManagedActions,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private static bool HasManagedAction(Game game, string actionName)
+        {
+            if (game == null || game.GameActions == null)
+            {
+                return false;
+            }
+
+            return game.GameActions.Any(action =>
+                action != null &&
+                action.Type == GameActionType.File &&
+                !action.IsPlayAction &&
+                string.Equals(action.Name, actionName, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(action.Path) &&
+                string.IsNullOrEmpty(action.Arguments));
         }
 
         private void RunR4IConflictFixture(string dataPath, string fixtureProfile)
