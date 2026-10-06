@@ -535,6 +535,73 @@ namespace SemperSupraRdteSeeder
                     true));
         }
 
+        private void RunScaleUpdateFixture(string dataPath)
+        {
+            const int scaleGameCount = 1000;
+            var result = "PASS";
+            var detail = string.Empty;
+            var presentCount = 0;
+
+            try
+            {
+                EnsureMetadata(
+                    PlayniteApi.Database.Sources,
+                    new GameSource { Id = SourceManual, Name = "Manual RDTE" });
+
+                using (PlayniteApi.Database.BufferedUpdate())
+                {
+                    for (var index = 0; index < scaleGameCount; index++)
+                    {
+                        var id = Guid.Parse(
+                            "75000000-0000-4000-8000-" + index.ToString("x12"));
+                        if (PlayniteApi.Database.Games.Get(id) == null)
+                        {
+                            PlayniteApi.Database.Games.Add(
+                                new Game("RDTE Scale Game " + index.ToString("D4"))
+                                {
+                                    Id = id,
+                                    GameId = "rdte-scale-" + index.ToString("D4"),
+                                    SourceId = SourceManual,
+                                    IsInstalled = false,
+                                    OverrideInstallState = true,
+                                    Notes = "RDTE scale fixture"
+                                });
+                        }
+                    }
+                }
+
+                presentCount = Enumerable.Range(0, scaleGameCount).Count(index =>
+                    PlayniteApi.Database.Games.Get(
+                        Guid.Parse(
+                            "75000000-0000-4000-8000-" + index.ToString("x12"))) != null);
+                if (presentCount != scaleGameCount)
+                {
+                    throw new InvalidOperationException(
+                        "Scale fixture did not materialize all games.");
+                }
+
+                detail = "Scale fixture materialized.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "scale-update-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-scale-update-fixture/v1",
+                        result = result,
+                        scale_game_count = presentCount,
+                        total_library_games = PlayniteApi.Database.Games.Count,
+                        detail = detail
+                    },
+                    true));
+        }
+
         private void RunNativePersistenceFixture(
             string dataPath,
             string fixturePath)
