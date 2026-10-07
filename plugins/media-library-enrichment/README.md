@@ -18,3 +18,20 @@ The current vertical slice is intentionally observation-only:
 This slice exists to qualify the second real family plugin through the native build/package/install/restart/uninstall RDTE path before artwork mutation, UI, rollback, provider networking, or shared framework extraction is introduced.
 
 Product authority: issue #21.
+
+
+## Installation and updates
+
+Release artifact:
+
+`4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext`
+
+For an independent GitHub release, download the `.pext` asset and install it through Playnite's native extension installer. The release package is built with Playnite Toolbox and is expected to have SHA-256:
+
+`897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938`
+
+The public `InstallerManifest.yaml` is maintained for Playnite Add-on Browser/update compatibility. Once official new-plugin intake is available and the add-on is accepted into the Playnite Addon Database, the direct install URI will be:
+
+`playnite://playnite/installaddon/4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377`
+
+Release procedure and official-distribution handoff are documented in `RELEASING.md`.
