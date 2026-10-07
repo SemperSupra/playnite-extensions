@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace SemperSupraRdteSeeder
 {
@@ -15,6 +16,8 @@ namespace SemperSupraRdteSeeder
         public static readonly Guid PluginGuid = Guid.Parse("6d06cf1b-d1e4-4caa-b6c3-cc6026953135");
         public override Guid Id { get; } = PluginGuid;
 
+        private static readonly Guid MediaLibraryEnrichmentPluginId =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377");
         private static readonly Guid SourceHumble = Guid.Parse("70000000-0000-4000-8000-000000000001");
         private static readonly Guid SourceManual = Guid.Parse("70000000-0000-4000-8000-000000000002");
         private static readonly Guid CategoryBook = Guid.Parse("71000000-0000-4000-8000-000000000001");
@@ -230,6 +233,15 @@ namespace SemperSupraRdteSeeder
                     StringComparison.OrdinalIgnoreCase))
             {
                 RunScaleUpdateFixture(dataPath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "mle-menu-control-qualification-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunMleMenuControlQualification(dataPath);
                 return;
             }
 
@@ -1755,6 +1767,477 @@ namespace SemperSupraRdteSeeder
                         detail = detail
                     },
                     true));
+        }
+
+        private void RunMleMenuControlQualification(string dataPath)
+        {
+            var result = "PASS";
+            var detail = string.Empty;
+            var menuSurface = false;
+            var previewNoMutation = false;
+            var applyEnabled = false;
+            var observePreservedState = false;
+            var rollbackReturnedToObserve = false;
+            var previewSummary = string.Empty;
+            var applySummary = string.Empty;
+            var observeSummary = string.Empty;
+            var rollbackSummary = string.Empty;
+
+            try
+            {
+                var extensionsDataDirectory = Directory.GetParent(dataPath);
+                if (extensionsDataDirectory == null ||
+                    extensionsDataDirectory.Parent == null)
+                {
+                    throw new InvalidOperationException(
+                        "Unable to resolve Playnite user-data root.");
+                }
+
+                var userData = extensionsDataDirectory.Parent.FullName;
+                var productData = Path.Combine(
+                    userData,
+                    "ExtensionsData",
+                    MediaLibraryEnrichmentPluginId.ToString());
+                var productAssemblyPath = Path.Combine(
+                    userData,
+                    "Extensions",
+                    MediaLibraryEnrichmentPluginId.ToString(),
+                    "MediaLibraryEnrichment.dll");
+
+                if (!File.Exists(productAssemblyPath))
+                {
+                    throw new InvalidOperationException(
+                        "Installed Media Library Enrichment assembly is unavailable.");
+                }
+
+                var assembly = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(candidate => string.Equals(
+                        candidate.GetName().Name,
+                        "MediaLibraryEnrichment",
+                        StringComparison.Ordinal));
+                if (assembly == null)
+                {
+                    assembly = Assembly.LoadFrom(productAssemblyPath);
+                }
+
+                var pluginType = assembly.GetType(
+                    "MediaLibraryEnrichment.MediaLibraryEnrichmentPlugin",
+                    true);
+                var plugin = Activator.CreateInstance(
+                    pluginType,
+                    new object[] { PlayniteApi });
+
+                var getMenuItems = pluginType.GetMethod(
+                    "GetMainMenuItems",
+                    BindingFlags.Instance | BindingFlags.Public);
+                var buildPreviewSummary = pluginType.GetMethod(
+                    "BuildPreviewSummary",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var executeModeCore = pluginType.GetMethod(
+                    "ExecuteModeCore",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+                if (getMenuItems == null ||
+                    buildPreviewSummary == null ||
+                    executeModeCore == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected menu command surface is unavailable.");
+                }
+
+                var menuItems = ((IEnumerable<MainMenuItem>)getMenuItems.Invoke(
+                    plugin,
+                    new object[] { null })).ToList();
+                var expectedDescriptions = new[]
+                {
+                    "Preview current enrichment",
+                    "Apply and enable reconciliation",
+                    "Observe only (disable changes)",
+                    "Rollback owned changes"
+                };
+
+                if (menuItems.Count != expectedDescriptions.Length ||
+                    !menuItems.Select(item => item.Description)
+                        .SequenceEqual(expectedDescriptions) ||
+                    menuItems.Any(item =>
+                        !string.Equals(
+                            item.MenuSection,
+                            "@Media Library Enrichment",
+                            StringComparison.Ordinal) ||
+                        item.Action == null))
+                {
+                    throw new InvalidOperationException(
+                        "Playnite menu surface does not expose the four bounded controls.");
+                }
+                menuSurface = true;
+
+                if (!string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Menu qualification must start in observe mode.");
+                }
+
+                var previewBefore = CaptureMleManagedState();
+                previewSummary = (string)buildPreviewSummary.Invoke(
+                    plugin,
+                    new object[0]);
+                var previewAfter = CaptureMleManagedState();
+
+                if (!string.Equals(
+                        previewBefore,
+                        previewAfter,
+                        StringComparison.Ordinal) ||
+                    !previewSummary.Contains("No changes were applied.") ||
+                    !previewSummary.Contains("Candidates: 4") ||
+                    !string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Preview mutated managed library state or changed mode.");
+                }
+                previewNoMutation = true;
+
+                applySummary = (string)executeModeCore.Invoke(
+                    plugin,
+                    new object[] { "apply", false });
+                AssertMleManagedState(true);
+                if (!string.Equals(
+                        ReadMleMode(productData),
+                        "apply",
+                        StringComparison.Ordinal) ||
+                    !applySummary.Contains("Mode: apply") ||
+                    !applySummary.Contains("Applied: 13"))
+                {
+                    throw new InvalidOperationException(
+                        "Apply command did not reconcile and persist apply mode.");
+                }
+                applyEnabled = true;
+
+                var observeBefore = CaptureMleManagedState();
+                observeSummary = (string)executeModeCore.Invoke(
+                    plugin,
+                    new object[] { "observe", false });
+                var observeAfter = CaptureMleManagedState();
+                AssertMleManagedState(true);
+                if (!string.Equals(
+                        observeBefore,
+                        observeAfter,
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal) ||
+                    !observeSummary.Contains("Mode: observe") ||
+                    !observeSummary.Contains("Applied: 0"))
+                {
+                    throw new InvalidOperationException(
+                        "Observe command changed managed state or failed to persist observe mode.");
+                }
+                observePreservedState = true;
+
+                rollbackSummary = (string)executeModeCore.Invoke(
+                    plugin,
+                    new object[] { "rollback", true });
+                AssertMleManagedState(false);
+                if (!string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal) ||
+                    !rollbackSummary.Contains("Mode: rollback") ||
+                    !rollbackSummary.Contains("Rollback applied: 13") ||
+                    !rollbackSummary.Contains(
+                        "Mode returned to observe after rollback."))
+                {
+                    throw new InvalidOperationException(
+                        "Rollback command did not remove owned state and return to observe.");
+                }
+                rollbackReturnedToObserve = true;
+
+                detail =
+                    "Preview/apply/observe/rollback command cores passed against the real Playnite API.";
+            }
+            catch (TargetInvocationException exception)
+            {
+                result = "FAIL";
+                detail = exception.InnerException == null
+                    ? exception.Message
+                    : exception.InnerException.Message;
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "mle-menu-control-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-mle-menu-control/v1",
+                        result = result,
+                        menu_surface = menuSurface,
+                        preview_no_library_mutation = previewNoMutation,
+                        apply_enabled = applyEnabled,
+                        observe_preserved_state = observePreservedState,
+                        rollback_returned_to_observe = rollbackReturnedToObserve,
+                        preview_summary = previewSummary,
+                        apply_summary = applySummary,
+                        observe_summary = observeSummary,
+                        rollback_summary = rollbackSummary,
+                        final_managed_state = CaptureMleManagedState(),
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private string ReadMleMode(string productData)
+        {
+            var settingsPath = Path.Combine(productData, "settings.json");
+            if (!File.Exists(settingsPath))
+            {
+                return string.Empty;
+            }
+
+            var settings = Serialization.FromJson<Dictionary<string, string>>(
+                File.ReadAllText(settingsPath));
+            string mode;
+            return settings != null &&
+                settings.TryGetValue("Mode", out mode)
+                    ? mode ?? string.Empty
+                    : string.Empty;
+        }
+
+        private string CaptureMleManagedState()
+        {
+            var expectations = new[]
+            {
+                new
+                {
+                    GameId = GameBook,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameComic,
+                    CategoryId = EnrichmentCategoryComic,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-comic.cbz",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameAudio,
+                    CategoryId = EnrichmentCategoryAudio,
+                    ActionName = "Listen",
+                    ActionPathName = "rdte-soundtrack.flac",
+                    CoverExpected = false
+                },
+                new
+                {
+                    GameId = GameManualMedia,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = false
+                }
+            };
+
+            var parts = new List<string>();
+            foreach (var expected in expectations)
+            {
+                var game = PlayniteApi.Database.Games.Get(expected.GameId);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected menu-control fixture game is unavailable: " +
+                        expected.GameId);
+                }
+
+                var membershipPresent =
+                    game.CategoryIds != null &&
+                    game.CategoryIds.Contains(expected.CategoryId);
+                var actionCount = game.GameActions == null
+                    ? 0
+                    : game.GameActions.Count(action =>
+                        !action.IsPlayAction &&
+                        string.Equals(
+                            action.Name,
+                            expected.ActionName,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            Path.GetFileName(action.Path),
+                            expected.ActionPathName,
+                            StringComparison.Ordinal));
+                var coverPresent = !string.IsNullOrWhiteSpace(game.CoverImage);
+
+                parts.Add(
+                    expected.GameId + ":" +
+                    membershipPresent + ":" +
+                    actionCount + ":" +
+                    coverPresent);
+            }
+
+            foreach (var presetId in new[]
+            {
+                EnrichmentFilterPresetBooks,
+                EnrichmentFilterPresetComics,
+                EnrichmentFilterPresetAudio
+            })
+            {
+                var preset = PlayniteApi.Database.FilterPresets.Get(presetId);
+                parts.Add(
+                    "preset:" + presetId + ":" +
+                    (preset == null ? "absent" : preset.Name));
+            }
+
+            var ordinary = PlayniteApi.Database.Games.Get(GameManual);
+            if (ordinary == null)
+            {
+                throw new InvalidOperationException(
+                    "Ordinary manual-game control is unavailable.");
+            }
+            var ordinaryMemberships = ordinary.CategoryIds == null
+                ? 0
+                : ordinary.CategoryIds.Count(id =>
+                    id == EnrichmentCategoryBook ||
+                    id == EnrichmentCategoryComic ||
+                    id == EnrichmentCategoryAudio);
+            var ordinaryActions = ordinary.GameActions == null
+                ? 0
+                : ordinary.GameActions.Count(action =>
+                    string.Equals(action.Name, "Read", StringComparison.Ordinal) ||
+                    string.Equals(action.Name, "Listen", StringComparison.Ordinal));
+            parts.Add(
+                "ordinary:" + ordinaryMemberships + ":" + ordinaryActions);
+
+            return string.Join("|", parts);
+        }
+
+        private void AssertMleManagedState(bool expectedPresent)
+        {
+            var expectations = new[]
+            {
+                new
+                {
+                    GameId = GameBook,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameComic,
+                    CategoryId = EnrichmentCategoryComic,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-comic.cbz",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameAudio,
+                    CategoryId = EnrichmentCategoryAudio,
+                    ActionName = "Listen",
+                    ActionPathName = "rdte-soundtrack.flac",
+                    CoverExpected = false
+                },
+                new
+                {
+                    GameId = GameManualMedia,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = false
+                }
+            };
+
+            foreach (var expected in expectations)
+            {
+                var game = PlayniteApi.Database.Games.Get(expected.GameId);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected menu-control fixture game is unavailable.");
+                }
+
+                var membershipPresent =
+                    game.CategoryIds != null &&
+                    game.CategoryIds.Contains(expected.CategoryId);
+                var actionCount = game.GameActions == null
+                    ? 0
+                    : game.GameActions.Count(action =>
+                        !action.IsPlayAction &&
+                        string.Equals(
+                            action.Name,
+                            expected.ActionName,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            Path.GetFileName(action.Path),
+                            expected.ActionPathName,
+                            StringComparison.Ordinal));
+                var coverPresent = !string.IsNullOrWhiteSpace(game.CoverImage);
+
+                if (membershipPresent != expectedPresent ||
+                    (expectedPresent ? actionCount != 1 : actionCount != 0) ||
+                    (expected.CoverExpected &&
+                        coverPresent != expectedPresent))
+                {
+                    throw new InvalidOperationException(
+                        "Managed state does not match expected menu-command outcome for " +
+                        game.Name + ".");
+                }
+            }
+
+            foreach (var presetId in new[]
+            {
+                EnrichmentFilterPresetBooks,
+                EnrichmentFilterPresetComics,
+                EnrichmentFilterPresetAudio
+            })
+            {
+                var present =
+                    PlayniteApi.Database.FilterPresets.Get(presetId) != null;
+                if (present != expectedPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Managed filter-preset state does not match menu-command outcome.");
+                }
+            }
+
+            var ordinary = PlayniteApi.Database.Games.Get(GameManual);
+            if (ordinary == null)
+            {
+                throw new InvalidOperationException(
+                    "Ordinary manual-game control is unavailable.");
+            }
+            if ((ordinary.CategoryIds != null &&
+                    ordinary.CategoryIds.Any(id =>
+                        id == EnrichmentCategoryBook ||
+                        id == EnrichmentCategoryComic ||
+                        id == EnrichmentCategoryAudio)) ||
+                (ordinary.GameActions != null &&
+                    ordinary.GameActions.Any(action =>
+                        string.Equals(
+                            action.Name,
+                            "Read",
+                            StringComparison.Ordinal) ||
+                        string.Equals(
+                            action.Name,
+                            "Listen",
+                            StringComparison.Ordinal))))
+            {
+                throw new InvalidOperationException(
+                    "Menu command mutated the ordinary manual-game control.");
+            }
         }
 
         private static void EnsureFile(string path, string content)
