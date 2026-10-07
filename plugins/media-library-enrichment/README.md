@@ -54,40 +54,10 @@ Release artifact:
 
 `4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext`
 
-For an independent GitHub release, download the `.pext` asset and install it through Playnite's native extension installer. The release package is built with Playnite Toolbox and is expected to have SHA-256:
-
-`897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938`
+For an independent GitHub release, download the `.pext` asset and install it through Playnite's native extension installer. The package is rebuilt and fully requalified from the exact release revision; the release publishes its matching `.sha256` checksum alongside the package.
 
 The public `InstallerManifest.yaml` is maintained for Playnite Add-on Browser/update compatibility. Once official new-plugin intake is available and the add-on is accepted into the Playnite Addon Database, the direct install URI will be:
 
 `playnite://playnite/installaddon/4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377`
 
 Release procedure and official-distribution handoff are documented in `RELEASING.md`.
-
-
-## Automation control surface
-
-MLE reuses Playnite's native URI handler rather than shipping a separate CLI or service.
-
-Registered source:
-
-```text
-playnite://sempersupra-mle/<command>
-```
-
-Bounded commands:
-
-- `preview` — computes the same non-mutating preview used by the Playnite menu;
-- `apply` — runs the same qualified apply core and leaves apply-mode startup reconciliation enabled;
-- `observe` — runs observation only and persists observe mode;
-- `rollback` — runs the same ownership/CAS rollback core and returns to observe mode.
-
-The URI surface accepts exactly one fixed command argument. It accepts no target paths, scripts, application names, or arbitrary mutation parameters. Each invocation writes `uri-command-receipt.json` under this plugin's `ExtensionsData` directory so automation has a machine-readable result without UI automation.
-
-Unknown, missing, or surplus URI arguments fail closed and do not invoke reconciliation.
-
-## Compatibility contract
-
-The product references `PlayniteSDK 6.16.0`, and the prepared official installer manifest therefore declares `RequiredApiVersion: 6.16.0`. That field is the SDK/API compatibility floor, not an assertion that every Playnite application release has been runtime-qualified.
-
-Exact runtime support is tracked separately in RDTE evidence. The current Playnite 10 qualification lane is pinned to Playnite 10.62 portable SHA-256 `a31cd00e9942619a1efdc5c8474c3eed20de5f8f1c31f0b1352e336e941e0d1f`. Playnite 11 remains a separate future qualification lane.
