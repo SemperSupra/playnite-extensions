@@ -1,6 +1,9 @@
 name: Release Media Library Enrichment v0.1.0
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-media-library-enrichment-v0.1.0.yml"
   workflow_dispatch:
     inputs:
       publish:
@@ -13,7 +16,14 @@ permissions:
   contents: write
 
 jobs:
+  syntax:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release workflow parsed successfully."
+
   qualify-and-release:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
@@ -120,21 +130,21 @@ jobs:
           $assetPath = Join-Path $assetDir $releaseName
           $checksumPath = Join-Path $assetDir "$releaseName.sha256"
           $notes = Join-Path $env:RUNNER_TEMP "mle-release-notes.md"
-          @"
-          Media Library Enrichment v0.1.0
-
-          Initial public release for Playnite 10.
-
-          - Safe, ownership-aware enrichment for conservatively admitted books, comics, and audio.
-          - Native Playnite categories, shelves, covers, and non-Play Read/Listen actions.
-          - Preserves user overrides and external changes.
-          - Uses Windows registered/default handlers for media files.
-          - Qualified with Metadata Utilities 1.9.0.
-          - Qualified against libraries containing more than 10,000 records.
-
-          Qualified package SHA-256:
-          897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938
-          "@ | Set-Content $notes -Encoding utf8
+          @(
+            "Media Library Enrichment v0.1.0",
+            "",
+            "Initial public release for Playnite 10.",
+            "",
+            "- Safe, ownership-aware enrichment for conservatively admitted books, comics, and audio.",
+            "- Native Playnite categories, shelves, covers, and non-Play Read/Listen actions.",
+            "- Preserves user overrides and external changes.",
+            "- Uses Windows registered/default handlers for media files.",
+            "- Qualified with Metadata Utilities 1.9.0.",
+            "- Qualified against libraries containing more than 10,000 records.",
+            "",
+            "Qualified package SHA-256:",
+            "897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938"
+          ) | Set-Content $notes -Encoding utf8
 
           # Publish as a prerelease first so Playnite Toolbox can verify the
           # real public PackageUrl and InstallerManifestUrl before promotion.
