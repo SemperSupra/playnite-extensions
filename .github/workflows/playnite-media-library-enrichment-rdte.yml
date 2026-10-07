@@ -6,6 +6,13 @@ on:
       - "plugins/media-library-enrichment/**"
       - ".github/workflows/playnite-media-library-enrichment-rdte.yml"
       - "tooling/rdte/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "plugins/media-library-enrichment/**"
+      - ".github/workflows/playnite-media-library-enrichment-rdte.yml"
+      - "tooling/rdte/**"
   workflow_dispatch:
 
 permissions:
@@ -25,7 +32,7 @@ jobs:
         env:
           RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           RDTE_TRIGGER_SHA: ${{ github.sha }}
-          RDTE_PRODUCT_AUTHORITY_SHA: 52da39255864a0457bc2553d3a3c0c57ecd3faa2
+          RDTE_PRODUCT_AUTHORITY_SHA: e5c9e7a125910dabdacd734eee1f49abcd8937bf
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP "media-library-enrichment-rdte"
@@ -59,10 +66,6 @@ jobs:
             -KeepInstalledForConflict
 
           ./tooling/rdte/qualify-media-library-enrichment-menu.ps1 `
-            -WorkRoot $workRoot `
-            -EvidenceDir (Join-Path $evidence "media-library-enrichment")
-
-          ./tooling/rdte/qualify-media-library-enrichment-uri.ps1 `
             -WorkRoot $workRoot `
             -EvidenceDir (Join-Path $evidence "media-library-enrichment")
 
