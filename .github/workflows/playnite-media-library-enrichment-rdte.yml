@@ -25,7 +25,7 @@ jobs:
         env:
           RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           RDTE_TRIGGER_SHA: ${{ github.sha }}
-          RDTE_PRODUCT_AUTHORITY_SHA: e5c9e7a125910dabdacd734eee1f49abcd8937bf
+          RDTE_PRODUCT_AUTHORITY_SHA: c2a3f2ed466068e89e24111077adb33997868f20
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP "media-library-enrichment-rdte"
@@ -59,6 +59,10 @@ jobs:
             -KeepInstalledForConflict
 
           ./tooling/rdte/qualify-media-library-enrichment-menu.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir (Join-Path $evidence "media-library-enrichment")
+
+          ./tooling/rdte/qualify-media-library-enrichment-uri.ps1 `
             -WorkRoot $workRoot `
             -EvidenceDir (Join-Path $evidence "media-library-enrichment")
 
