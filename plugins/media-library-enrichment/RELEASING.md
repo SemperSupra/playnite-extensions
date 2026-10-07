@@ -12,11 +12,19 @@
 
 The product candidate was qualified on Playnite 10.62 with two independent exact-head native reps.
 
-Qualified package SHA-256:
+The product-head qualification at `2d88b4cf6cacb624e42a701ea12da7fdb5e03252` produced package SHA-256:
 
 `897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938`
 
-Release preparation must not change the package bytes. If the package hash changes, stop and requalify the new package before publication.
+That hash is historical evidence for that exact Git revision, not a cross-commit release invariant. .NET build provenance can change PE/debug identity when the repository revision changes even when product source blobs are unchanged.
+
+The authoritative release rule is therefore:
+1. release-only changes must not alter MLE product source or `extension.yaml`;
+2. the exact final public release revision must pass the complete native qualification suite;
+3. two independent builds of that exact revision must produce the same `.pext` SHA-256;
+4. that exact SHA-256 is published beside the release asset.
+
+If exact-head package hashes disagree, stop and diagnose before publication.
 
 ## Public release
 
@@ -25,7 +33,7 @@ The public repository is the source, release, and installer-manifest home. The r
 1. build from the exact selected public revision;
 2. run the native MLE qualification suite;
 3. package using the Playnite 10.62 Toolbox;
-4. require the qualified SHA-256 above;
+4. prove two exact-revision package builds are byte-identical;
 5. upload the package as a workflow artifact;
 6. create tag/release `media-library-enrichment-v0.1.0` only when publication is explicitly requested.
 
