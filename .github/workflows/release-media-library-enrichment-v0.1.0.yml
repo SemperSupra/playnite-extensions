@@ -46,6 +46,11 @@ jobs:
             throw "Unable to locate the disposable Playnite work root."
           }
           $workRoot = $workRoots[0].FullName
+          $toolboxes = @(Get-ChildItem (Join-Path $workRoot "runtime") -Filter "Toolbox.exe" -File -Recurse)
+          if ($toolboxes.Count -ne 1) {
+            throw "Expected exactly one pinned Toolbox.exe, found $($toolboxes.Count)."
+          }
+          "MLE_TOOLBOX=$($toolboxes[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $metadataUtilitiesPackage = Join-Path $env:RUNNER_TEMP "MetadataUtilities_485ab5f0-bfb1-4c17-93cc-20d8338673be_1_9_0.pext"
           Invoke-WebRequest -Uri "https://github.com/HerrKnarz/Playnite-Extensions/releases/download/2026-09-29/MetadataUtilities_485ab5f0-bfb1-4c17-93cc-20d8338673be_1_9_0.pext" -OutFile $metadataUtilitiesPackage
@@ -99,14 +104,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish GitHub Release
+      - name: Publish and verify GitHub Release
         if: ${{ inputs.publish }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if ($env:GITHUB_REF -ne "refs/heads/main") {
+            throw "Publication is allowed only from public main."
+          }
+
           $tag = "media-library-enrichment-v0.1.0"
           $assetDir = Join-Path $env:RUNNER_TEMP "media-library-enrichment-release-asset"
+          $releaseName = "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext"
+          $assetPath = Join-Path $assetDir $releaseName
+          $checksumPath = Join-Path $assetDir "$releaseName.sha256"
           $notes = Join-Path $env:RUNNER_TEMP "mle-release-notes.md"
           @"
           Media Library Enrichment v0.1.0
@@ -124,10 +136,44 @@ jobs:
           897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938
           "@ | Set-Content $notes -Encoding utf8
 
+          # Publish as a prerelease first so Playnite Toolbox can verify the
+          # real public PackageUrl and InstallerManifestUrl before promotion.
           gh release create $tag `
-            (Join-Path $assetDir "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext") `
-            (Join-Path $assetDir "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext.sha256") `
+            $assetPath `
+            $checksumPath `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --title "Media Library Enrichment v0.1.0" `
-            --notes-file $notes
+            --notes-file $notes `
+            --prerelease
+
+          $assetUrl = "https://github.com/SemperSupra/playnite-extensions/releases/download/$tag/$releaseName"
+          $deadline = [DateTime]::UtcNow.AddSeconds(45)
+          $reachable = $false
+          while ([DateTime]::UtcNow -lt $deadline) {
+            try {
+              $response = Invoke-WebRequest -Uri $assetUrl -Method Head -MaximumRedirection 8
+              if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+                $reachable = $true
+                break
+              }
+            }
+            catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $reachable) {
+            throw "Published prerelease asset did not become reachable."
+          }
+
+          & $env:MLE_TOOLBOX verify installer (Resolve-Path "./plugins/media-library-enrichment/InstallerManifest.yaml")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Playnite Toolbox rejected the published installer manifest."
+          }
+
+          & $env:MLE_TOOLBOX verify addon (Resolve-Path "./plugins/media-library-enrichment/distribution/PlayniteAddonDatabase.yaml")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Playnite Toolbox rejected the published add-on manifest."
+          }
+
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --prerelease=false --latest
