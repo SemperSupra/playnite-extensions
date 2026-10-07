@@ -134,15 +134,15 @@ function Find-InstalledExtension {
 }
 
 function Queue-Install {
-    @([ordered]@{ InstallType = 0; Path = $BridgePackage }) |
-        ConvertTo-Json -Depth 4 |
+    $queue = @([ordered]@{ InstallType = 0; Path = $BridgePackage })
+    ConvertTo-Json -InputObject $queue -Depth 4 |
         Set-Content -Path $queuePath -Encoding UTF8
 }
 
 function Queue-Uninstall {
     param([string]$InstalledDir)
-    @([ordered]@{ InstallType = 1; Path = $InstalledDir }) |
-        ConvertTo-Json -Depth 4 |
+    $queue = @([ordered]@{ InstallType = 1; Path = $InstalledDir })
+    ConvertTo-Json -InputObject $queue -Depth 4 |
         Set-Content -Path $queuePath -Encoding UTF8
 }
 
@@ -348,6 +348,12 @@ catch {
     throw
 }
 finally {
+    if (Test-Path $logPath -PathType Leaf) {
+        try { Copy-Item $logPath (Join-Path $EvidenceDir "playnite-bridge-playnite.log") -Force } catch {}
+    }
+    if (Test-Path $queuePath -PathType Leaf) {
+        try { Copy-Item $queuePath (Join-Path $EvidenceDir "extinstalls-residual.json") -Force } catch {}
+    }
     if ($process -and -not $process.HasExited) {
         try { Stop-Playnite } catch {
             try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
