@@ -29,7 +29,7 @@ if (-not (Test-Path $productAssembly -PathType Leaf)) {
     throw "Media Library Enrichment must remain installed for menu qualification."
 }
 
-$seederData = Join-Path $userData "ExtensionsData\$seederId"
+$seederData = Join-Path $userData "ExtensionsData\$seederDataId"
 $productData = Join-Path $userData "ExtensionsData\$productId"
 New-Item $seederData, $productData, $EvidenceDir -ItemType Directory -Force | Out-Null
 
@@ -119,7 +119,7 @@ try {
         Remove-Item $menuReceiptPath -Force
     }
 
-    $seederDir = Join-Path $userData "Extensions\$seederId"
+    $seederDir = Join-Path $userData "Extensions\$seederExtensionId"
     if (-not (Test-Path (Join-Path $seederDir "extension.yaml") -PathType Leaf)) {
         $seederPackages = @(
             Get-ChildItem (Join-Path $WorkRoot "fixture-seeder-package") -Filter "*.pext" -File
