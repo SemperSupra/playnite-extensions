@@ -36,7 +36,6 @@ New-Item $seederData, $productData, $EvidenceDir -ItemType Directory -Force | Ou
 $profilePath = Join-Path $seederData "fixture-profile.txt"
 $menuReceiptPath = Join-Path $seederData "mle-menu-control-receipt.json"
 $settingsPath = Join-Path $productData "settings.json"
-$queuePath = Join-Path $userData "extinstalls.json"
 
 function Set-ProductMode {
     param([ValidateSet("observe", "apply", "rollback")][string]$Mode)
@@ -96,21 +95,6 @@ function Wait-ForFile {
     throw "Timed out waiting for '$Path'."
 }
 
-function Wait-ForQueue {
-    param($Process)
-
-    $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
-    while ((Test-Path $queuePath) -and [DateTime]::UtcNow -lt $deadline) {
-        if ($Process.HasExited) {
-            throw "Playnite exited before consuming the extension queue."
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    if (Test-Path $queuePath) {
-        throw "Playnite did not consume the extension queue."
-    }
-}
-
 function Wait-ForPlayniteQuiescence {
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -128,27 +112,8 @@ function Wait-ForPlayniteQuiescence {
     throw "Playnite runtime was not quiescent before menu qualification."
 }
 
-function Find-InstalledExtension {
-    param([string]$ExpectedId)
-
-    $root = Join-Path $userData "Extensions"
-    if (-not (Test-Path $root)) {
-        return $null
-    }
-
-    foreach ($manifest in @(Get-ChildItem $root -Filter "extension.yaml" -File -Recurse)) {
-        $yaml = Get-Content $manifest.FullName -Raw
-        $match = [regex]::Match($yaml, "(?m)^Id:\s*(?<value>\S+)\s*$")
-        if ($match.Success -and $match.Groups["value"].Value.Trim() -eq $ExpectedId) {
-            return $manifest.Directory.FullName
-        }
-    }
-
-    return $null
-}
-
 $process = $null
-$seederInstalledDir = $null
+$harnessSeederDir = Join-Path $userData "Extensions\rdte-menu-seeder"
 try {
     Wait-ForPlayniteQuiescence
     Set-ProductMode -Mode "observe"
@@ -157,30 +122,38 @@ try {
         Remove-Item $menuReceiptPath -Force
     }
 
-    $seederInstalledDir = Find-InstalledExtension -ExpectedId $seederExtensionId
-    if (-not $seederInstalledDir) {
-        $seederPackages = @(
-            Get-ChildItem (Join-Path $WorkRoot "fixture-seeder-package") -Filter "*.pext" -File
-        )
-        if ($seederPackages.Count -ne 1) {
-            throw "Expected exactly one fixture-seeder package."
-        }
+    $seederPackages = @(
+        Get-ChildItem (Join-Path $WorkRoot "fixture-seeder-package") -Filter "*.pext" -File
+    )
+    if ($seederPackages.Count -ne 1) {
+        throw "Expected exactly one fixture-seeder package."
+    }
 
-        @([ordered]@{ InstallType = 0; Path = $seederPackages[0].FullName }) |
-            ConvertTo-Json -Depth 4 |
-            Set-Content -Path $queuePath -Encoding UTF8
+    if (Test-Path $harnessSeederDir) {
+        Remove-Item $harnessSeederDir -Recurse -Force
+    }
+    New-Item $harnessSeederDir -ItemType Directory -Force | Out-Null
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory(
+        $seederPackages[0].FullName,
+        $harnessSeederDir)
+
+    $seederManifestPath = Join-Path $harnessSeederDir "extension.yaml"
+    if (-not (Test-Path $seederManifestPath -PathType Leaf)) {
+        throw "Staged menu fixture seeder lacks extension.yaml."
+    }
+    $seederManifest = Get-Content $seederManifestPath -Raw
+    $seederIdMatch = [regex]::Match(
+        $seederManifest,
+        "(?m)^Id:\s*(?<value>\S+)\s*$")
+    if (-not $seederIdMatch.Success -or
+        $seederIdMatch.Groups["value"].Value.Trim() -ne $seederExtensionId) {
+        throw "Staged menu fixture seeder identity mismatch."
     }
 
     $process = Start-Playnite
-    if (Test-Path $queuePath) {
-        Wait-ForQueue -Process $process
-    }
     Wait-ForFile -Path $menuReceiptPath -Process $process
-
-    $seederInstalledDir = Find-InstalledExtension -ExpectedId $seederExtensionId
-    if (-not $seederInstalledDir) {
-        throw "Fixture seeder did not materialize for menu qualification."
-    }
 
     $receipt = Get-Content $menuReceiptPath -Raw | ConvertFrom-Json
     if ($receipt.schema -ne "sempersupra-playnite-mle-menu-control/v1" -or
@@ -203,26 +176,7 @@ try {
     Stop-Playnite
     $process = $null
     Wait-ForPlayniteQuiescence
-
-    @([ordered]@{ InstallType = 1; Path = $seederInstalledDir }) |
-        ConvertTo-Json -Depth 4 |
-        Set-Content -Path $queuePath -Encoding UTF8
-    $process = Start-Playnite
-    Wait-ForQueue -Process $process
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
-    while ((Test-Path $seederInstalledDir) -and [DateTime]::UtcNow -lt $deadline) {
-        if ($process.HasExited) {
-            throw "Playnite exited before fixture-seeder uninstall completed."
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    if (Test-Path $seederInstalledDir) {
-        throw "Fixture seeder remained installed after menu qualification."
-    }
-
-    Stop-Playnite
-    $process = $null
+    Remove-Item $harnessSeederDir -Recurse -Force
 }
 finally {
     Set-Content -Path $profilePath -Value "media-raw-v1" -Encoding UTF8
@@ -231,5 +185,8 @@ finally {
         try { Stop-Playnite } catch {
             try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
         }
+    }
+    if (Test-Path $harnessSeederDir) {
+        try { Remove-Item $harnessSeederDir -Recurse -Force } catch {}
     }
 }
