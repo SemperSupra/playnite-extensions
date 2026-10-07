@@ -31,7 +31,6 @@ namespace MediaLibraryEnrichment
 
         public override void OnApplicationStarted(OnApplicationStartedEventArgs args)
         {
-            RegisterUriSource();
             RunReconciliation();
         }
 
