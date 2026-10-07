@@ -1,0 +1,25 @@
+name: Dispatch MLE v0.1.0 publication
+
+on:
+  push:
+    branches:
+      - "ops/mle-v0.1.0-publish-dispatch"
+    paths:
+      - ".github/workflows/dispatch-mle-v0.1.0-publication.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch qualified main release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release-media-library-enrichment-v0.1.0.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f publish=true
