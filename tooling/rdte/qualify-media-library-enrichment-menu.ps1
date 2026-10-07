@@ -13,7 +13,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $productId = "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377"
-$seederId = "6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
+$seederExtensionId = "SemperSupraRdteSeeder_6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
+$seederDataId = "6d06cf1b-d1e4-4caa-b6c3-cc6026953135"
 $userData = Join-Path $WorkRoot "userdata"
 $runtimeDir = Join-Path $WorkRoot "runtime"
 $desktop = @(Get-ChildItem $runtimeDir -Filter "Playnite.DesktopApp.exe" -File -Recurse)
