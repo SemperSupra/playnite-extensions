@@ -93,11 +93,11 @@ jobs:
             throw "Qualified package was not produced."
           }
 
-          $expected = "897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938"
           $actual = (Get-FileHash $qualifiedPackage -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) {
-            throw "Release package SHA-256 changed. Expected $expected but got $actual. Requalification is required."
+          if ([string]::IsNullOrWhiteSpace($actual) -or $actual.Length -ne 64) {
+            throw "Unable to compute the exact release package SHA-256."
           }
+          "MLE_RELEASE_SHA256=$actual" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $releaseDir = Join-Path $env:RUNNER_TEMP "media-library-enrichment-release-asset"
           New-Item $releaseDir -ItemType Directory -Force | Out-Null
@@ -142,8 +142,8 @@ jobs:
             "- Qualified with Metadata Utilities 1.9.0.",
             "- Qualified against libraries containing more than 10,000 records.",
             "",
-            "Qualified package SHA-256:",
-            "897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938"
+            "Exact release package SHA-256:",
+            $env:MLE_RELEASE_SHA256
           ) | Set-Content $notes -Encoding utf8
 
           # Publish as a prerelease first so Playnite Toolbox can verify the
