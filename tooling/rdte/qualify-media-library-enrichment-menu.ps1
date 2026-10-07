@@ -111,16 +111,54 @@ function Wait-ForQueue {
     }
 }
 
+function Wait-ForPlayniteQuiescence {
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProcessName -like "Playnite.DesktopApp*" -or
+            $_.ProcessName -like "Playnite.FullscreenApp*" -or
+            $_.ProcessName -like "Playnite.BrowserProcess*"
+        })
+        if ($running.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "Playnite runtime was not quiescent before menu qualification."
+}
+
+function Find-InstalledExtension {
+    param([string]$ExpectedId)
+
+    $root = Join-Path $userData "Extensions"
+    if (-not (Test-Path $root)) {
+        return $null
+    }
+
+    foreach ($manifest in @(Get-ChildItem $root -Filter "extension.yaml" -File -Recurse)) {
+        $yaml = Get-Content $manifest.FullName -Raw
+        $match = [regex]::Match($yaml, "(?m)^Id:\s*(?<value>\S+)\s*$")
+        if ($match.Success -and $match.Groups["value"].Value.Trim() -eq $ExpectedId) {
+            return $manifest.Directory.FullName
+        }
+    }
+
+    return $null
+}
+
 $process = $null
+$seederInstalledDir = $null
 try {
+    Wait-ForPlayniteQuiescence
     Set-ProductMode -Mode "observe"
     Set-Content -Path $profilePath -Value "mle-menu-control-qualification-v1" -Encoding UTF8
     if (Test-Path $menuReceiptPath) {
         Remove-Item $menuReceiptPath -Force
     }
 
-    $seederDir = Join-Path $userData "Extensions\$seederExtensionId"
-    if (-not (Test-Path (Join-Path $seederDir "extension.yaml") -PathType Leaf)) {
+    $seederInstalledDir = Find-InstalledExtension -ExpectedId $seederExtensionId
+    if (-not $seederInstalledDir) {
         $seederPackages = @(
             Get-ChildItem (Join-Path $WorkRoot "fixture-seeder-package") -Filter "*.pext" -File
         )
@@ -139,6 +177,11 @@ try {
     }
     Wait-ForFile -Path $menuReceiptPath -Process $process
 
+    $seederInstalledDir = Find-InstalledExtension -ExpectedId $seederExtensionId
+    if (-not $seederInstalledDir) {
+        throw "Fixture seeder did not materialize for menu qualification."
+    }
+
     $receipt = Get-Content $menuReceiptPath -Raw | ConvertFrom-Json
     if ($receipt.schema -ne "sempersupra-playnite-mle-menu-control/v1" -or
         $receipt.result -ne "PASS" -or
@@ -156,6 +199,30 @@ try {
     }
 
     Copy-Item $menuReceiptPath (Join-Path $EvidenceDir "menu-control-receipt.json") -Force
+
+    Stop-Playnite
+    $process = $null
+    Wait-ForPlayniteQuiescence
+
+    @([ordered]@{ InstallType = 1; Path = $seederInstalledDir }) |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -Path $queuePath -Encoding UTF8
+    $process = Start-Playnite
+    Wait-ForQueue -Process $process
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ((Test-Path $seederInstalledDir) -and [DateTime]::UtcNow -lt $deadline) {
+        if ($process.HasExited) {
+            throw "Playnite exited before fixture-seeder uninstall completed."
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    if (Test-Path $seederInstalledDir) {
+        throw "Fixture seeder remained installed after menu qualification."
+    }
+
+    Stop-Playnite
+    $process = $null
 }
 finally {
     Set-Content -Path $profilePath -Value "media-raw-v1" -Encoding UTF8
