@@ -8,6 +8,15 @@ on:
       - "plugins/media-library-enrichment/distribution/**"
       - "plugins/media-library-enrichment/src/MediaLibraryEnrichment/MediaLibraryEnrichment.csproj"
       - ".github/workflows/verify-media-library-enrichment-release-metadata.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "plugins/media-library-enrichment/extension.yaml"
+      - "plugins/media-library-enrichment/InstallerManifest.yaml"
+      - "plugins/media-library-enrichment/distribution/**"
+      - "plugins/media-library-enrichment/src/MediaLibraryEnrichment/MediaLibraryEnrichment.csproj"
+      - ".github/workflows/verify-media-library-enrichment-release-metadata.yml"
   workflow_dispatch:
 
 permissions:
