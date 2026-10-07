@@ -6,6 +6,13 @@ on:
       - "plugins/media-library-enrichment/**"
       - ".github/workflows/playnite-media-library-enrichment-rdte.yml"
       - "tooling/rdte/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "plugins/media-library-enrichment/**"
+      - ".github/workflows/playnite-media-library-enrichment-rdte.yml"
+      - "tooling/rdte/**"
   workflow_dispatch:
 
 permissions:
