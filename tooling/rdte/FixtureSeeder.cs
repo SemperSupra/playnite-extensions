@@ -2004,13 +2004,12 @@ namespace SemperSupraRdteSeeder
                 return string.Empty;
             }
 
-            var settings = Serialization.FromJson<Dictionary<string, string>>(
-                File.ReadAllText(settingsPath));
-            string mode;
-            return settings != null &&
-                settings.TryGetValue("Mode", out mode)
-                    ? mode ?? string.Empty
-                    : string.Empty;
+            var match = System.Text.RegularExpressions.Regex.Match(
+                File.ReadAllText(settingsPath),
+                "\\\"Mode\\\"\\s*:\\s*\\\"(?<value>[^\\\"]*)\\\"");
+            return match.Success
+                ? match.Groups["value"].Value
+                : string.Empty;
         }
 
         private string CaptureMleManagedState()
