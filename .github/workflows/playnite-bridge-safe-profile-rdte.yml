@@ -1,0 +1,71 @@
+name: Playnite Bridge Safe-Profile RDTE
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/playnite-bridge-safe-profile-rdte.yml"
+      - "tooling/rdte/qualify-playnite-bridge-safe-profile.ps1"
+      - "tooling/rdte/probe-playnite-runtime.ps1"
+      - "tooling/rdte/FixtureSeeder.cs"
+      - "tooling/rdte/playnite-10.62.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  characterize:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Characterize upstream Playnite Bridge authority
+        env:
+          RDTE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "playnite-bridge-safe-profile-rdte"
+          $runtimeEvidence = Join-Path $evidence "runtime"
+
+          ./tooling/rdte/probe-playnite-runtime.ps1 `
+            -ManifestPath ./tooling/rdte/playnite-10.62.json `
+            -EvidenceDir $runtimeEvidence `
+            -ExerciseFixtureSeeder `
+            -FixtureProfile media-raw-v1
+
+          $workRoots = @(
+            Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
+              Sort-Object LastWriteTimeUtc -Descending
+          )
+          if ($workRoots.Count -lt 1) {
+            throw "Unable to locate disposable Playnite work root."
+          }
+          $workRoot = $workRoots[0].FullName
+
+          $package = Join-Path $env:RUNNER_TEMP "PlayniteBridge_v1.5.3.pext"
+          Invoke-WebRequest `
+            -Uri "https://github.com/rollacode/playnite-bridge/releases/download/v1.5.3/PlayniteBridge_v1.5.3.pext" `
+            -OutFile $package
+
+          $actual = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "27733103da7885eb8400dfdbe075108ba9e9b7a6beef83f197ccf5bb27658cd4") {
+            throw "Pinned Playnite Bridge v1.5.3 package SHA-256 mismatch."
+          }
+
+          ./tooling/rdte/qualify-playnite-bridge-safe-profile.ps1 `
+            -WorkRoot $workRoot `
+            -BridgePackage $package `
+            -EvidenceDir $evidence
+
+      - name: Upload Playnite Bridge RDTE evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: playnite-bridge-safe-profile-rdte-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/playnite-bridge-safe-profile-rdte
+          if-no-files-found: error
+          retention-days: 14
