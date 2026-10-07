@@ -47,86 +47,8 @@ namespace MediaLibraryEnrichment
         {
             try
             {
-                var dataPath = GetPluginUserDataPath();
-                Directory.CreateDirectory(dataPath);
-
-                var admissionEvidence = MediaAdmissionEvidenceSnapshot.LoadOrEmpty(
-                    Path.Combine(dataPath, "admission-evidence.json"));
-                var candidates = CaptureCandidates(admissionEvidence);
-                var categoryLedger = CategoryLedger.LoadOrCreate(
-                    Path.Combine(dataPath, "category-ledger.json"));
-                var actionLedger = ActionLedger.LoadOrCreate(
-                    Path.Combine(dataPath, "action-ledger.json"));
-                var coverEvidence = CoverEvidenceSnapshot.LoadOrEmpty(
-                    Path.Combine(dataPath, "cover-evidence.json"));
-                var coverLedger = CoverLedger.LoadOrCreate(
-                    Path.Combine(dataPath, "cover-ledger.json"));
-
-                var categoryPlan = BuildApplyPlan(candidates, categoryLedger);
-                var actionPlan = BuildActionApplyPlan(candidates, actionLedger);
-                var coverPlan = BuildCoverApplyPlan(coverEvidence, coverLedger);
-
-                var kindSummary = string.Join(
-                    ", ",
-                    candidates
-                        .GroupBy(item => item.Kind ?? "unresolved")
-                        .OrderBy(group => group.Key, StringComparer.Ordinal)
-                        .Select(group => group.Key + "=" + group.Count()));
-
-                var planned =
-                    categoryPlan.Count(item => string.Equals(
-                        item.Outcome,
-                        "ADD_MEMBERSHIP",
-                        StringComparison.Ordinal)) +
-                    actionPlan.Count(item => string.Equals(
-                        item.Outcome,
-                        "ADD_ACTION",
-                        StringComparison.Ordinal)) +
-                    coverPlan.Count(item => string.Equals(
-                        item.Outcome,
-                        "ADD_COVER",
-                        StringComparison.Ordinal));
-
-                var conflicts =
-                    categoryPlan.Count(item =>
-                        (item.Outcome ?? string.Empty).StartsWith(
-                            "CONFLICT",
-                            StringComparison.Ordinal)) +
-                    actionPlan.Count(item =>
-                        (item.Outcome ?? string.Empty).StartsWith(
-                            "CONFLICT",
-                            StringComparison.Ordinal)) +
-                    coverPlan.Count(item =>
-                        (item.Outcome ?? string.Empty).StartsWith(
-                            "CONFLICT",
-                            StringComparison.Ordinal));
-
-                var userOverrides =
-                    categoryPlan.Count(item => string.Equals(
-                        item.Outcome,
-                        "USER_OVERRIDE",
-                        StringComparison.Ordinal)) +
-                    actionPlan.Count(item => string.Equals(
-                        item.Outcome,
-                        "USER_OVERRIDE",
-                        StringComparison.Ordinal)) +
-                    coverPlan.Count(item => string.Equals(
-                        item.Outcome,
-                        "USER_OVERRIDE",
-                        StringComparison.Ordinal));
-
                 PlayniteApi.Dialogs.ShowMessage(
-                    "No changes were applied.\n\n" +
-                    "Candidates: " + candidates.Length + "\n" +
-                    "Kinds: " + (string.IsNullOrEmpty(kindSummary)
-                        ? "none"
-                        : kindSummary) + "\n" +
-                    "Planned owned changes: " + planned + "\n" +
-                    "User overrides preserved: " + userOverrides + "\n" +
-                    "Conflicts requiring no automatic mutation: " + conflicts + "\n" +
-                    "Managed shelves: " +
-                    FilterPresetEnrichmentPolicy.All().Length +
-                    " (reconciled after categories are present).",
+                    BuildPreviewSummary(),
                     "Media Library Enrichment Preview");
             }
             catch (Exception exception)
@@ -137,7 +59,107 @@ namespace MediaLibraryEnrichment
             }
         }
 
+        private string BuildPreviewSummary()
+        {
+            var dataPath = GetPluginUserDataPath();
+            Directory.CreateDirectory(dataPath);
+
+            var admissionEvidence = MediaAdmissionEvidenceSnapshot.LoadOrEmpty(
+                Path.Combine(dataPath, "admission-evidence.json"));
+            var candidates = CaptureCandidates(admissionEvidence);
+            var categoryLedger = CategoryLedger.LoadOrCreate(
+                Path.Combine(dataPath, "category-ledger.json"));
+            var actionLedger = ActionLedger.LoadOrCreate(
+                Path.Combine(dataPath, "action-ledger.json"));
+            var coverEvidence = CoverEvidenceSnapshot.LoadOrEmpty(
+                Path.Combine(dataPath, "cover-evidence.json"));
+            var coverLedger = CoverLedger.LoadOrCreate(
+                Path.Combine(dataPath, "cover-ledger.json"));
+
+            var categoryPlan = BuildApplyPlan(candidates, categoryLedger);
+            var actionPlan = BuildActionApplyPlan(candidates, actionLedger);
+            var coverPlan = BuildCoverApplyPlan(coverEvidence, coverLedger);
+
+            var kindSummary = string.Join(
+                ", ",
+                candidates
+                    .GroupBy(item => item.Kind ?? "unresolved")
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .Select(group => group.Key + "=" + group.Count()));
+
+            var planned =
+                categoryPlan.Count(item => string.Equals(
+                    item.Outcome,
+                    "ADD_MEMBERSHIP",
+                    StringComparison.Ordinal)) +
+                actionPlan.Count(item => string.Equals(
+                    item.Outcome,
+                    "ADD_ACTION",
+                    StringComparison.Ordinal)) +
+                coverPlan.Count(item => string.Equals(
+                    item.Outcome,
+                    "ADD_COVER",
+                    StringComparison.Ordinal));
+
+            var conflicts =
+                categoryPlan.Count(item =>
+                    (item.Outcome ?? string.Empty).StartsWith(
+                        "CONFLICT",
+                        StringComparison.Ordinal)) +
+                actionPlan.Count(item =>
+                    (item.Outcome ?? string.Empty).StartsWith(
+                        "CONFLICT",
+                        StringComparison.Ordinal)) +
+                coverPlan.Count(item =>
+                    (item.Outcome ?? string.Empty).StartsWith(
+                        "CONFLICT",
+                        StringComparison.Ordinal));
+
+            var userOverrides =
+                categoryPlan.Count(item => string.Equals(
+                    item.Outcome,
+                    "USER_OVERRIDE",
+                    StringComparison.Ordinal)) +
+                actionPlan.Count(item => string.Equals(
+                    item.Outcome,
+                    "USER_OVERRIDE",
+                    StringComparison.Ordinal)) +
+                coverPlan.Count(item => string.Equals(
+                    item.Outcome,
+                    "USER_OVERRIDE",
+                    StringComparison.Ordinal));
+
+            return "No changes were applied.\n\n" +
+                "Candidates: " + candidates.Length + "\n" +
+                "Kinds: " + (string.IsNullOrEmpty(kindSummary)
+                    ? "none"
+                    : kindSummary) + "\n" +
+                "Planned owned changes: " + planned + "\n" +
+                "User overrides preserved: " + userOverrides + "\n" +
+                "Conflicts requiring no automatic mutation: " + conflicts + "\n" +
+                "Managed shelves: " +
+                FilterPresetEnrichmentPolicy.All().Length +
+                " (reconciled after categories are present).";
+        }
+
         private void ExecuteMode(string mode, bool returnToObserve)
+        {
+            try
+            {
+                PlayniteApi.Dialogs.ShowMessage(
+                    ExecuteModeCore(mode, returnToObserve),
+                    "Media Library Enrichment");
+            }
+            catch (Exception exception)
+            {
+                PlayniteApi.Dialogs.ShowErrorMessage(
+                    "Reconciliation failed and observe mode was requested as the fail-safe: " +
+                    exception.Message,
+                    "Media Library Enrichment");
+            }
+        }
+
+        private string ExecuteModeCore(string mode, bool returnToObserve)
         {
             try
             {
@@ -151,11 +173,9 @@ namespace MediaLibraryEnrichment
                     summary += "\n\nMode returned to observe after rollback.";
                 }
 
-                PlayniteApi.Dialogs.ShowMessage(
-                    summary,
-                    "Media Library Enrichment");
+                return summary;
             }
-            catch (Exception exception)
+            catch
             {
                 try
                 {
@@ -166,10 +186,7 @@ namespace MediaLibraryEnrichment
                     // Preserve the original failure; startup normalization remains fail-safe.
                 }
 
-                PlayniteApi.Dialogs.ShowErrorMessage(
-                    "Reconciliation failed and observe mode was requested as the fail-safe: " +
-                    exception.Message,
-                    "Media Library Enrichment");
+                throw;
             }
         }
 
