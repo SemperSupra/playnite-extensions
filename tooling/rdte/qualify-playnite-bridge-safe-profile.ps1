@@ -209,8 +209,33 @@ try {
     $process = Start-Playnite
     Wait-ForQueueConsumed -Process $process
     Wait-ForText -Path $logPath -Text "Loaded plugin: Playnite Bridge, version $expectedVersion" -Process $process
-    Wait-ForText -Path $logPath -Text "Playnite Bridge API started on port $port" -Process $process
     Wait-ForFile -Path $authPath -Process $process
+    $receipt.observations.on_application_started_entered = $true
+
+    $listenerDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    $listenerReady = $false
+    while ([DateTime]::UtcNow -lt $listenerDeadline) {
+        if ($process.HasExited) {
+            throw "Playnite exited while waiting for Playnite Bridge HTTP listener."
+        }
+        try {
+            $probe = Invoke-WebRequest -Uri "http://localhost:$port/api/app/info" -Method GET -SkipHttpErrorCheck -UseBasicParsing -TimeoutSec 2
+            if ($probe.StatusCode -eq 401) {
+                $listenerReady = $true
+                break
+            }
+        }
+        catch {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    if (-not $listenerReady) {
+        $tcp = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+        $receipt.observations.tcp_listener_count = $tcp.Count
+        $receipt.observations.tcp_listener_addresses = @($tcp | ForEach-Object LocalAddress | Sort-Object -Unique)
+        throw "Playnite Bridge OnApplicationStarted created auth state but HTTP listener did not become reachable."
+    }
+    $receipt.observations.http_listener_reachable = $true
 
     $installedDir = Find-InstalledExtension
     if (-not $installedDir) {
@@ -348,9 +373,6 @@ catch {
     throw
 }
 finally {
-    if (Test-Path $logPath -PathType Leaf) {
-        try { Copy-Item $logPath (Join-Path $EvidenceDir "playnite-bridge-playnite.log") -Force } catch {}
-    }
     if (Test-Path $queuePath -PathType Leaf) {
         try { Copy-Item $queuePath (Join-Path $EvidenceDir "extinstalls-residual.json") -Force } catch {}
     }
@@ -358,6 +380,9 @@ finally {
         try { Stop-Playnite } catch {
             try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
         }
+    }
+    if (Test-Path $logPath -PathType Leaf) {
+        try { Copy-Item $logPath (Join-Path $EvidenceDir "playnite-bridge-playnite.log") -Force } catch {}
     }
 
     $receipt.finished_utc = [DateTime]::UtcNow.ToString("o")
