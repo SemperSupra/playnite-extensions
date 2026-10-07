@@ -184,8 +184,11 @@ function Read-MleUriReceipt {
     if (-not ($receipt.playnite_version -like "10.62*")) {
         throw "URI receipt is not bound to Playnite 10.62."
     }
-    if (-not ($receipt.sdk_version -like "6.16*")) {
-        throw "URI receipt is not bound to SDK 6.16."
+    $runtimeSdk = [version]$receipt.sdk_version
+    $requiredSdk = [version]"6.16.0"
+    if ($runtimeSdk.Major -ne $requiredSdk.Major -or
+        $runtimeSdk -lt $requiredSdk) {
+        throw "URI receipt runtime SDK is below the required 6.16.0 API floor."
     }
 
     Copy-Item $uriReceiptPath (Join-Path $EvidenceDir $EvidenceName) -Force
