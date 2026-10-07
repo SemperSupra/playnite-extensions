@@ -23,37 +23,17 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Verify release metadata with pinned Playnite Toolbox
+      - name: Verify pre-release metadata contract
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $evidence = Join-Path $env:RUNNER_TEMP "mle-release-metadata"
-          ./tooling/rdte/probe-playnite-runtime.ps1 `
-            -ManifestPath ./tooling/rdte/playnite-10.62.json `
-            -EvidenceDir (Join-Path $evidence "runtime")
-
-          $workRoot = @(
-            Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
-              Sort-Object LastWriteTimeUtc -Descending
-          )[0].FullName
-          if (-not $workRoot) { throw "Pinned Playnite work root was not materialized." }
-
-          $toolbox = @(
-            Get-ChildItem (Join-Path $workRoot "runtime") -Filter "Toolbox.exe" -File -Recurse
-          )
-          if ($toolbox.Count -ne 1) {
-            throw "Expected exactly one pinned Toolbox.exe, found $($toolbox.Count)."
-          }
+          New-Item $evidence -ItemType Directory -Force | Out-Null
 
           $extensionPath = Resolve-Path "./plugins/media-library-enrichment/extension.yaml"
           $installerPath = Resolve-Path "./plugins/media-library-enrichment/InstallerManifest.yaml"
           $addonPath = Resolve-Path "./plugins/media-library-enrichment/distribution/PlayniteAddonDatabase.yaml"
           $projectPath = Resolve-Path "./plugins/media-library-enrichment/src/MediaLibraryEnrichment/MediaLibraryEnrichment.csproj"
-
-          & $toolbox[0].FullName verify installer $installerPath
-          if ($LASTEXITCODE -ne 0) {
-            throw "Playnite Toolbox rejected InstallerManifest.yaml."
-          }
 
           $extension = Get-Content $extensionPath -Raw
           $installer = Get-Content $installerPath -Raw
@@ -77,7 +57,6 @@ jobs:
           if (-not $addon.Contains($installerUrl)) { throw "Addon database InstallerManifestUrl mismatch." }
           if ($project -notmatch 'PackageReference Include="PlayniteSDK" Version="6\.16\.0"') { throw "PlayniteSDK/API release contract mismatch." }
 
-          New-Item $evidence -ItemType Directory -Force | Out-Null
           [ordered]@{
             schema = "sempersupra-mle-release-metadata/v1"
             result = "PASS"
@@ -87,7 +66,7 @@ jobs:
             required_api_version = $api
             release_asset_url = $releaseAsset
             installer_manifest_url = $installerUrl
-            toolbox_verify_installer = "PASS"
+            toolbox_verify_installer = "DEFERRED_UNTIL_RELEASE_ASSET_IS_REACHABLE"
           } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $evidence "release-metadata-receipt.json") -Encoding utf8
 
       - name: Upload release metadata evidence
