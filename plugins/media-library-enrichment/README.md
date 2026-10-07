@@ -54,9 +54,7 @@ Release artifact:
 
 `4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext`
 
-For an independent GitHub release, download the `.pext` asset and install it through Playnite's native extension installer. The release package is built with Playnite Toolbox and is expected to have SHA-256:
-
-`897e1e1a97c545c41c0da606776f96f8832b14c0fd0118074d7c246c92e4a938`
+For an independent GitHub release, download the `.pext` asset and install it through Playnite's native extension installer. The package is rebuilt and fully requalified from the exact release revision; the release publishes its matching `.sha256` checksum alongside the package.
 
 The public `InstallerManifest.yaml` is maintained for Playnite Add-on Browser/update compatibility. Once official new-plugin intake is available and the add-on is accepted into the Playnite Addon Database, the direct install URI will be:
 
