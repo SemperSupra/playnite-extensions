@@ -27,12 +27,11 @@ namespace MediaLibraryEnrichment
             {
                 HasSettings = false
             };
-
-            RegisterUriSource();
         }
 
         public override void OnApplicationStarted(OnApplicationStartedEventArgs args)
         {
+            RegisterUriSource();
             RunReconciliation();
         }
 

@@ -58,6 +58,19 @@ function Start-Playnite {
     ) -PassThru
 }
 
+function Start-PlayniteWithUri {
+    param([Parameter(Mandatory = $true)][string]$Uri)
+
+    Start-Process -FilePath $desktopExe -WorkingDirectory (Split-Path -Parent $desktopExe) -ArgumentList @(
+        "--userdatadir", $userData,
+        "--uridata", $Uri,
+        "--nolibupdate",
+        "--hidesplashscreen",
+        "--forcedefaulttheme",
+        "--forcesoftrender"
+    ) -PassThru
+}
+
 function Stop-Playnite {
     $stopper = Start-Process -FilePath $desktopExe -WorkingDirectory (Split-Path -Parent $desktopExe) -ArgumentList @(
         "--userdatadir", $userData,
@@ -150,6 +163,35 @@ function Get-ManagedFingerprint {
     return ($values | ConvertTo-Json -Compress)
 }
 
+function Read-MleUriReceipt {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExpectedCommand,
+        [Parameter(Mandatory = $true)][ValidateSet("PASS", "FAIL")][string]$ExpectedResult,
+        [Parameter(Mandatory = $true)][string]$EvidenceName,
+        $Process
+    )
+
+    Wait-ForFile -Path $uriReceiptPath -Process $Process
+    $receipt = Get-Content $uriReceiptPath -Raw | ConvertFrom-Json
+
+    if ($receipt.schema -ne "sempersupra-media-library-enrichment-uri-command/v1" -or
+        $receipt.source -ne $uriSource -or
+        $receipt.command -ne $ExpectedCommand -or
+        $receipt.result -ne $ExpectedResult) {
+        throw "Unexpected URI command receipt."
+    }
+
+    if (-not ($receipt.playnite_version -like "10.62*")) {
+        throw "URI receipt is not bound to Playnite 10.62."
+    }
+    if (-not ($receipt.sdk_version -like "6.16*")) {
+        throw "URI receipt is not bound to SDK 6.16."
+    }
+
+    Copy-Item $uriReceiptPath (Join-Path $EvidenceDir $EvidenceName) -Force
+    return $receipt
+}
+
 function Invoke-MleUri {
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
@@ -173,25 +215,7 @@ function Invoke-MleUri {
         throw "URI sender did not exit after forwarding '$Uri'."
     }
 
-    Wait-ForFile -Path $uriReceiptPath -Process $Process
-    $receipt = Get-Content $uriReceiptPath -Raw | ConvertFrom-Json
-
-    if ($receipt.schema -ne "sempersupra-media-library-enrichment-uri-command/v1" -or
-        $receipt.source -ne $uriSource -or
-        $receipt.command -ne $ExpectedCommand -or
-        $receipt.result -ne $ExpectedResult) {
-        throw "Unexpected URI command receipt for '$Uri'."
-    }
-
-    if (-not ($receipt.playnite_version -like "10.62*")) {
-        throw "URI receipt is not bound to Playnite 10.62."
-    }
-    if (-not ($receipt.sdk_version -like "6.16*")) {
-        throw "URI receipt is not bound to SDK 6.16."
-    }
-
-    Copy-Item $uriReceiptPath (Join-Path $EvidenceDir $EvidenceName) -Force
-    return $receipt
+    return Read-MleUriReceipt -ExpectedCommand $ExpectedCommand -ExpectedResult $ExpectedResult -EvidenceName $EvidenceName -Process $Process
 }
 
 function Assert-ApplyCounts {
@@ -243,10 +267,20 @@ try {
         Remove-Item $logPath -Force
     }
 
-    $process = Start-Playnite
-    Wait-ForText -Path $logPath -Text "Loaded plugin: Media Library Enrichment, version 0.1.0" -Process $process
-
     $before = Get-ManagedFingerprint
+    if (Test-Path $uriReceiptPath) {
+        Remove-Item $uriReceiptPath -Force
+    }
+    $process = Start-PlayniteWithUri -Uri "playnite://sempersupra-mle/preview"
+    Wait-ForText -Path $logPath -Text "Loaded plugin: Media Library Enrichment, version 0.1.0" -Process $process
+    $preview = Read-MleUriReceipt -ExpectedCommand "preview" -ExpectedResult "PASS" -EvidenceName "uri-preview-cold-start-receipt.json" -Process $process
+    if (-not $preview.summary.Contains("No changes were applied.")) {
+        throw "Cold-start URI preview did not return the qualified preview summary."
+    }
+    if ((Get-ManagedFingerprint) -ne $before) {
+        throw "Cold-start URI preview mutated managed state."
+    }
+
     $unknown = Invoke-MleUri -Uri "playnite://sempersupra-mle/not-a-command" -ExpectedCommand "not-a-command" -ExpectedResult "FAIL" -EvidenceName "uri-unknown-receipt.json" -Process $process
     if ((Get-ManagedFingerprint) -ne $before) {
         throw "Unknown URI command mutated managed state."
@@ -257,12 +291,12 @@ try {
         throw "Surplus URI arguments mutated managed state."
     }
 
-    $preview = Invoke-MleUri -Uri "playnite://sempersupra-mle/preview" -ExpectedCommand "preview" -ExpectedResult "PASS" -EvidenceName "uri-preview-receipt.json" -Process $process
+    $preview = Invoke-MleUri -Uri "playnite://sempersupra-mle/preview" -ExpectedCommand "preview" -ExpectedResult "PASS" -EvidenceName "uri-preview-running-receipt.json" -Process $process
     if (-not $preview.summary.Contains("No changes were applied.")) {
-        throw "URI preview did not return the qualified preview summary."
+        throw "Running-instance URI preview did not return the qualified preview summary."
     }
     if ((Get-ManagedFingerprint) -ne $before) {
-        throw "URI preview mutated managed state."
+        throw "Running-instance URI preview mutated managed state."
     }
 
     $apply = Invoke-MleUri -Uri "playnite://sempersupra-mle/apply" -ExpectedCommand "apply" -ExpectedResult "PASS" -EvidenceName "uri-apply-receipt.json" -Process $process
@@ -288,15 +322,17 @@ try {
 
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
     $csprojPath = Join-Path $repoRoot "plugins\media-library-enrichment\src\MediaLibraryEnrichment\MediaLibraryEnrichment.csproj"
-    $readmePath = Join-Path $repoRoot "plugins\media-library-enrichment\README.md"
+    $installerManifestPath = Join-Path $repoRoot "plugins\media-library-enrichment\InstallerManifest.yaml"
     $csproj = Get-Content $csprojPath -Raw
-    $readme = Get-Content $readmePath -Raw
+    $installerManifest = Get-Content $installerManifestPath -Raw
 
     if ($csproj -notmatch 'PackageReference\s+Include="PlayniteSDK"\s+Version="6\.16\.0"') {
         throw "Product SDK reference is not pinned to PlayniteSDK 6.16.0."
     }
-    if (-not $readme.Contains("RequiredApiVersion: 6.16.0")) {
-        throw "Distribution compatibility contract does not record RequiredApiVersion 6.16.0."
+    if (-not $installerManifest.Contains("AddonId: '4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377'") -or
+        -not $installerManifest.Contains("Version: 0.1.0") -or
+        -not $installerManifest.Contains("RequiredApiVersion: 6.16.0")) {
+        throw "Prepared installer manifest does not match MLE identity/version/API contract."
     }
 
     [ordered]@{
@@ -309,6 +345,7 @@ try {
         sdk_version = $preview.sdk_version
         unknown_command_fail_closed = $true
         surplus_arguments_fail_closed = $true
+        cold_start_uri_dispatch = $true
         preview_non_mutating = $true
         apply_enabled = $true
         observe_preserved_state = $true
