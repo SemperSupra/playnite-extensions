@@ -1,0 +1,11 @@
+AddonId: '4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377'
+Type: Generic
+Name: 'Media Library Enrichment'
+Author: 'Mark E. DeYoung'
+ShortDescription: 'Adds safe, reversible media semantics and actions to non-game media represented in Playnite.'
+InstallerManifestUrl: https://raw.githubusercontent.com/SemperSupra/playnite-extensions/main/plugins/media-library-enrichment/InstallerManifest.yaml
+SourceUrl: https://github.com/SemperSupra/playnite-extensions
+Description: 'Enriches conservatively admitted books, comics, and audio with native Playnite categories, shelves, covers, and Read/Listen actions while preserving user overrides and external changes.'
+Tags: ['media', 'library', 'ebooks', 'comics', 'audio']
+Links:
+  Source: https://github.com/SemperSupra/playnite-extensions
