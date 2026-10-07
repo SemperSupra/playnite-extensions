@@ -1,0 +1,12 @@
+AddonId: '4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377'
+Packages:
+  - Version: 0.1.0
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-10-07
+    PackageUrl: https://github.com/SemperSupra/playnite-extensions/releases/download/media-library-enrichment-v0.1.0/4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext
+    Changelog:
+      - Initial public release.
+      - Enriches conservatively admitted book, comic, and audio records with owned categories, shelves, actions, and covers.
+      - Preserves user overrides and external changes through ownership-aware reconciliation and rollback.
+      - Uses Playnite and Windows native handlers for Read and Listen actions; no bundled media player or reader.
+      - Qualified with Metadata Utilities 1.9.0 and libraries containing more than 10,000 records.

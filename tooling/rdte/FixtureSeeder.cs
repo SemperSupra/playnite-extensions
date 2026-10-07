@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace SemperSupraRdteSeeder
 {
@@ -15,19 +16,49 @@ namespace SemperSupraRdteSeeder
         public static readonly Guid PluginGuid = Guid.Parse("6d06cf1b-d1e4-4caa-b6c3-cc6026953135");
         public override Guid Id { get; } = PluginGuid;
 
+        private static readonly Guid MediaLibraryEnrichmentPluginId =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377");
         private static readonly Guid SourceHumble = Guid.Parse("70000000-0000-4000-8000-000000000001");
         private static readonly Guid SourceManual = Guid.Parse("70000000-0000-4000-8000-000000000002");
         private static readonly Guid CategoryBook = Guid.Parse("71000000-0000-4000-8000-000000000001");
         private static readonly Guid CategoryComic = Guid.Parse("71000000-0000-4000-8000-000000000002");
         private static readonly Guid CategoryAudio = Guid.Parse("71000000-0000-4000-8000-000000000003");
         private static readonly Guid SeriesMedia = Guid.Parse("72000000-0000-4000-8000-000000000001");
+        private static readonly Guid EnrichmentCategoryBook =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1401");
+        private static readonly Guid EnrichmentCategoryComic =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1402");
+        private static readonly Guid EnrichmentCategoryAudio =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1403");
+        private const string EnrichmentCategoryBookName = "SemperSupra.Media:Book";
+        private const string EnrichmentCategoryComicName = "SemperSupra.Media:Comic";
+        private const string EnrichmentCategoryAudioName = "SemperSupra.Media:Audio";
+        private static readonly Guid EnrichmentFilterPresetBooks =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1501");
+        private static readonly Guid EnrichmentFilterPresetComics =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1502");
+        private static readonly Guid EnrichmentFilterPresetAudio =
+            Guid.Parse("4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1503");
+        private const string EnrichmentFilterPresetBooksName = "SemperSupra Media: Books";
+        private const string EnrichmentFilterPresetComicsName = "SemperSupra Media: Comics";
+        private const string EnrichmentFilterPresetAudioName = "SemperSupra Media: Audio";
+        private const string ExternalFilterPresetBooksName = "External Books Shelf";
+        private static readonly Guid MetadataUtilitiesExternalCategory =
+            Guid.Parse("74000000-0000-4000-8000-000000000001");
+        private static readonly Guid MetadataUtilitiesUnusedCategory =
+            Guid.Parse("74000000-0000-4000-8000-000000000002");
+        private const string MetadataUtilitiesExternalCategoryName =
+            "RDTE.MetadataUtilities.External";
+        private const string MetadataUtilitiesUnusedCategoryName =
+            "RDTE.MetadataUtilities.Unused";
 
         private static readonly Guid GameBook = Guid.Parse("73000000-0000-4000-8000-000000000001");
         private static readonly Guid GameComic = Guid.Parse("73000000-0000-4000-8000-000000000002");
         private static readonly Guid GameAudio = Guid.Parse("73000000-0000-4000-8000-000000000003");
         private static readonly Guid GameManual = Guid.Parse("73000000-0000-4000-8000-000000000004");
+        private static readonly Guid GameManualMedia = Guid.Parse("73000000-0000-4000-8000-000000000005");
 
-        private static readonly Guid[] FixtureGameIds = { GameBook, GameComic, GameAudio, GameManual };
+        private static readonly Guid[] FixtureGameIds = { GameBook, GameComic, GameAudio, GameManual, GameManualMedia };
 
         public SemperSupraRdteSeeder(IPlayniteAPI api) : base(api)
         {
@@ -40,32 +71,219 @@ namespace SemperSupraRdteSeeder
             var fixturePath = Path.Combine(dataPath, "media");
             Directory.CreateDirectory(fixturePath);
 
+            var profilePath = Path.Combine(dataPath, "fixture-profile.txt");
+            var fixtureProfile = File.Exists(profilePath)
+                ? File.ReadAllText(profilePath).Trim()
+                : "media-baseline-v1";
+            var rawMediaProfile = string.Equals(
+                fixtureProfile,
+                "media-raw-v1",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-native-persistence-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunNativePersistenceFixture(dataPath, fixturePath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-user-category-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-category-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-category-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserCategoryOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-user-action-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-action-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-action-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserActionOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-user-filter-preset-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-filter-preset-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-filter-preset-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserFilterPresetOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-user-cover-override-remove-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-cover-override-verify-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-user-cover-override-restore-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunUserCoverOverrideFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunR4IConflictFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-action-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-action-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunActionConflictFixture(dataPath, fixturePath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-filter-preset-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-filter-preset-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunFilterPresetConflictFixture(dataPath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "r4i-cover-conflict-apply-v1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    fixtureProfile,
+                    "r4i-cover-conflict-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunCoverConflictFixture(dataPath, fixturePath, fixtureProfile);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "metadata-utilities-coexistence-seed-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunMetadataUtilitiesCoexistenceSeedFixture(dataPath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "metadata-utilities-coexistence-verify-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunMetadataUtilitiesCoexistenceVerifyFixture(dataPath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "mle-scale-update-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunScaleUpdateFixture(dataPath);
+                return;
+            }
+
+            if (string.Equals(
+                    fixtureProfile,
+                    "mle-menu-control-qualification-v1",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                RunMleMenuControlQualification(dataPath);
+                return;
+            }
+
             var pdfPath = Path.Combine(fixturePath, "rdte-book.pdf");
             var epubPath = Path.Combine(fixturePath, "rdte-book.epub");
             var cbzPath = Path.Combine(fixturePath, "rdte-comic.cbz");
             var flacPath = Path.Combine(fixturePath, "rdte-soundtrack.flac");
+            var bookCoverPath = Path.Combine(fixturePath, "rdte-book-cover.png");
+            var comicCoverPath = Path.Combine(fixturePath, "rdte-comic-cover.png");
 
             EnsureFile(pdfPath, "%PDF-1.4\n% SemperSupra deterministic RDTE fixture\n");
             EnsureFile(epubPath, "SemperSupra RDTE EPUB placeholder\n");
             EnsureFile(cbzPath, "SemperSupra RDTE CBZ placeholder\n");
             EnsureFile(flacPath, "fLaC\nSemperSupra RDTE audio placeholder\n");
+            EnsureBytes(
+                bookCoverPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAwCAIAAAD/zu84AAAAL0lEQVR4nO3NQQEAAATAQISTWEAl+N0C7HK647N6vQMAAAAAAAAAAAAAAAAAAI5bNqQBoI/pblYAAAAASUVORK5CYII="));
+            EnsureBytes(
+                comicCoverPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAwCAIAAAD/zu84AAAAMklEQVR4nO3NMQEAMAjAsDFxKEEiAjEBXyqgiax+l/3TOwAAAAAAAAAAAAAAAAAAYLkBV0oBvtuG7qwAAAAASUVORK5CYII="));
 
             using (PlayniteApi.Database.BufferedUpdate())
             {
                 EnsureMetadata(PlayniteApi.Database.Sources, new GameSource { Id = SourceHumble, Name = "Humble Bundle RDTE" });
                 EnsureMetadata(PlayniteApi.Database.Sources, new GameSource { Id = SourceManual, Name = "Manual RDTE" });
-                EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryBook, Name = "Media: Book" });
-                EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryComic, Name = "Media: Comic" });
-                EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryAudio, Name = "Media: Audio" });
-                EnsureMetadata(PlayniteApi.Database.Series, new Series { Id = SeriesMedia, Name = "RDTE Media Series" });
+                if (!rawMediaProfile)
+                {
+                    EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryBook, Name = "Media: Book" });
+                    EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryComic, Name = "Media: Comic" });
+                    EnsureMetadata(PlayniteApi.Database.Categories, new Category { Id = CategoryAudio, Name = "Media: Audio" });
+                    EnsureMetadata(PlayniteApi.Database.Series, new Series { Id = SeriesMedia, Name = "RDTE Media Series" });
+                }
 
                 UpsertGame(new Game("RDTE Humble Ebook")
                 {
                     Id = GameBook,
                     GameId = "rdte-humble-ebook",
                     SourceId = SourceHumble,
-                    CategoryIds = new List<Guid> { CategoryBook },
-                    SeriesIds = new List<Guid> { SeriesMedia },
+                    CategoryIds = rawMediaProfile ? null : new List<Guid> { CategoryBook },
+                    SeriesIds = rawMediaProfile ? null : new List<Guid> { SeriesMedia },
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -79,8 +297,8 @@ namespace SemperSupraRdteSeeder
                     Id = GameComic,
                     GameId = "rdte-humble-comic",
                     SourceId = SourceHumble,
-                    CategoryIds = new List<Guid> { CategoryComic },
-                    SeriesIds = new List<Guid> { SeriesMedia },
+                    CategoryIds = rawMediaProfile ? null : new List<Guid> { CategoryComic },
+                    SeriesIds = rawMediaProfile ? null : new List<Guid> { SeriesMedia },
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -94,7 +312,7 @@ namespace SemperSupraRdteSeeder
                     Id = GameAudio,
                     GameId = "rdte-humble-soundtrack",
                     SourceId = SourceHumble,
-                    CategoryIds = new List<Guid> { CategoryAudio },
+                    CategoryIds = rawMediaProfile ? null : new List<Guid> { CategoryAudio },
                     IsInstalled = true,
                     OverrideInstallState = true,
                     InstallDirectory = fixturePath,
@@ -112,6 +330,19 @@ namespace SemperSupraRdteSeeder
                     Manual = pdfPath,
                     Notes = "RDTE ordinary game/manual control fixture"
                 });
+
+                UpsertGame(new Game("RDTE Manual Media Book")
+                {
+                    Id = GameManualMedia,
+                    GameId = "rdte-manual-media-book",
+                    SourceId = SourceManual,
+                    IsInstalled = true,
+                    OverrideInstallState = true,
+                    InstallDirectory = fixturePath,
+                    Manual = pdfPath,
+                    CoverImage = null,
+                    Notes = "RDTE explicit admission media fixture: " + pdfPath
+                });
             }
 
             var present = FixtureGameIds
@@ -122,7 +353,7 @@ namespace SemperSupraRdteSeeder
             var receipt = new
             {
                 schema = "sempersupra-playnite-fixture-seed/v1",
-                fixture_set = "media-baseline-v1",
+                fixture_set = fixtureProfile,
                 expected_fixture_games = FixtureGameIds.Length,
                 observed_fixture_games = present.Count,
                 fixture_game_ids = FixtureGameIds.Select(id => id.ToString()).ToArray(),
@@ -135,11 +366,1893 @@ namespace SemperSupraRdteSeeder
                 Serialization.ToJson(receipt, true));
         }
 
+        private void RunMetadataUtilitiesCoexistenceSeedFixture(string dataPath)
+        {
+            var result = "PASS";
+            var detail = string.Empty;
+            var mediaMemberships = 0;
+            var ordinaryManualMembership = false;
+
+            try
+            {
+                using (PlayniteApi.Database.BufferedUpdate())
+                {
+                    EnsureMetadata(
+                        PlayniteApi.Database.Categories,
+                        new Category
+                        {
+                            Id = MetadataUtilitiesExternalCategory,
+                            Name = MetadataUtilitiesExternalCategoryName
+                        });
+                    EnsureMetadata(
+                        PlayniteApi.Database.Categories,
+                        new Category
+                        {
+                            Id = MetadataUtilitiesUnusedCategory,
+                            Name = MetadataUtilitiesUnusedCategoryName
+                        });
+
+                    foreach (var gameId in new[] { GameBook, GameComic, GameAudio, GameManualMedia })
+                    {
+                        var game = PlayniteApi.Database.Games.Get(gameId);
+                        if (game == null)
+                        {
+                            throw new InvalidOperationException(
+                                "Media fixture unavailable for coexistence seed: " + gameId + ".");
+                        }
+
+                        var categories = game.CategoryIds == null
+                            ? new List<Guid>()
+                            : new List<Guid>(game.CategoryIds);
+                        if (!categories.Contains(MetadataUtilitiesExternalCategory))
+                        {
+                            categories.Add(MetadataUtilitiesExternalCategory);
+                            game.CategoryIds = categories;
+                            PlayniteApi.Database.Games.Update(game);
+                        }
+                    }
+                }
+
+                foreach (var gameId in new[] { GameBook, GameComic, GameAudio, GameManualMedia })
+                {
+                    var game = PlayniteApi.Database.Games.Get(gameId);
+                    if (game != null &&
+                        game.CategoryIds != null &&
+                        game.CategoryIds.Contains(MetadataUtilitiesExternalCategory))
+                    {
+                        mediaMemberships++;
+                    }
+                }
+
+                var ordinaryManual = PlayniteApi.Database.Games.Get(GameManual);
+                ordinaryManualMembership =
+                    ordinaryManual != null &&
+                    ordinaryManual.CategoryIds != null &&
+                    ordinaryManual.CategoryIds.Contains(MetadataUtilitiesExternalCategory);
+
+                if (mediaMemberships != 4 ||
+                    ordinaryManualMembership ||
+                    PlayniteApi.Database.Categories.Get(MetadataUtilitiesUnusedCategory) == null)
+                {
+                    throw new InvalidOperationException(
+                        "Coexistence seed did not create the expected used and unused category state.");
+                }
+
+                detail = "Seeded a used external category and an unused external category.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "metadata-utilities-coexistence-seed-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-metadata-utilities-coexistence-seed/v1",
+                        result = result,
+                        external_category_id = MetadataUtilitiesExternalCategory.ToString(),
+                        external_category_name = MetadataUtilitiesExternalCategoryName,
+                        unused_category_id = MetadataUtilitiesUnusedCategory.ToString(),
+                        unused_category_name = MetadataUtilitiesUnusedCategoryName,
+                        media_memberships = mediaMemberships,
+                        ordinary_manual_membership = ordinaryManualMembership,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunMetadataUtilitiesCoexistenceVerifyFixture(string dataPath)
+        {
+            var result = "PASS";
+            var detail = string.Empty;
+            var mediaMemberships = 0;
+            var ordinaryManualMembership = false;
+            var unusedCategoryPresent = false;
+
+            try
+            {
+                var category =
+                    PlayniteApi.Database.Categories.Get(MetadataUtilitiesExternalCategory);
+                if (category == null ||
+                    !string.Equals(
+                        category.Name,
+                        MetadataUtilitiesExternalCategoryName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected used external category is absent or renamed.");
+                }
+
+                foreach (var gameId in new[] { GameBook, GameComic, GameAudio, GameManualMedia })
+                {
+                    var game = PlayniteApi.Database.Games.Get(gameId);
+                    if (game == null ||
+                        game.CategoryIds == null ||
+                        !game.CategoryIds.Contains(MetadataUtilitiesExternalCategory))
+                    {
+                        throw new InvalidOperationException(
+                            "Used external category missing from media fixture " + gameId + ".");
+                    }
+                    mediaMemberships++;
+                }
+
+                var ordinaryManual = PlayniteApi.Database.Games.Get(GameManual);
+                ordinaryManualMembership =
+                    ordinaryManual != null &&
+                    ordinaryManual.CategoryIds != null &&
+                    ordinaryManual.CategoryIds.Contains(MetadataUtilitiesExternalCategory);
+                if (ordinaryManualMembership)
+                {
+                    throw new InvalidOperationException(
+                        "Used external category leaked onto the ordinary manual control.");
+                }
+
+                unusedCategoryPresent =
+                    PlayniteApi.Database.Categories.Get(MetadataUtilitiesUnusedCategory) != null;
+                if (unusedCategoryPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Metadata Utilities did not clean the seeded unused category.");
+                }
+
+                detail =
+                    "Unused external category is gone while the used external category remains on all media fixtures.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "metadata-utilities-coexistence-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-metadata-utilities-coexistence-fixture/v2",
+                        result = result,
+                        external_category_id = MetadataUtilitiesExternalCategory.ToString(),
+                        external_category_name = MetadataUtilitiesExternalCategoryName,
+                        unused_category_id = MetadataUtilitiesUnusedCategory.ToString(),
+                        unused_category_name = MetadataUtilitiesUnusedCategoryName,
+                        expected_media_memberships = 4,
+                        observed_media_memberships = mediaMemberships,
+                        ordinary_manual_membership = ordinaryManualMembership,
+                        unused_category_present = unusedCategoryPresent,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunScaleUpdateFixture(string dataPath)
+        {
+            const int scaleGameCount = 10000;
+            var result = "PASS";
+            var detail = string.Empty;
+            var presentCount = 0;
+
+            try
+            {
+                EnsureMetadata(
+                    PlayniteApi.Database.Sources,
+                    new GameSource { Id = SourceManual, Name = "Manual RDTE" });
+
+                using (PlayniteApi.Database.BufferedUpdate())
+                {
+                    for (var index = 0; index < scaleGameCount; index++)
+                    {
+                        var id = Guid.Parse(
+                            "75000000-0000-4000-8000-" + index.ToString("x12"));
+                        if (PlayniteApi.Database.Games.Get(id) == null)
+                        {
+                            PlayniteApi.Database.Games.Add(
+                                new Game("RDTE Scale Game " + index.ToString("D4"))
+                                {
+                                    Id = id,
+                                    GameId = "rdte-scale-" + index.ToString("D4"),
+                                    SourceId = SourceManual,
+                                    IsInstalled = false,
+                                    OverrideInstallState = true,
+                                    Notes = "RDTE scale fixture"
+                                });
+                        }
+                    }
+                }
+
+                presentCount = Enumerable.Range(0, scaleGameCount).Count(index =>
+                    PlayniteApi.Database.Games.Get(
+                        Guid.Parse(
+                            "75000000-0000-4000-8000-" + index.ToString("x12"))) != null);
+                if (presentCount != scaleGameCount)
+                {
+                    throw new InvalidOperationException(
+                        "Scale fixture did not materialize all games.");
+                }
+
+                detail = "Scale fixture materialized.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "scale-update-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-scale-update-fixture/v1",
+                        result = result,
+                        scale_game_count = presentCount,
+                        total_library_games = PlayniteApi.Database.Games.Count,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunNativePersistenceFixture(
+            string dataPath,
+            string fixturePath)
+        {
+            string result = "PASS";
+            string detail = string.Empty;
+            var categoryMembershipCount = 0;
+            var actionCount = 0;
+            var filterPresetCount = 0;
+            var coverCount = 0;
+            var localFilesPresent = false;
+
+            try
+            {
+                var expectations = new[]
+                {
+                    new
+                    {
+                        GameId = GameBook,
+                        CategoryId = EnrichmentCategoryBook,
+                        ActionName = "Read",
+                        ActionPathName = "rdte-book.pdf"
+                    },
+                    new
+                    {
+                        GameId = GameComic,
+                        CategoryId = EnrichmentCategoryComic,
+                        ActionName = "Read",
+                        ActionPathName = "rdte-comic.cbz"
+                    },
+                    new
+                    {
+                        GameId = GameAudio,
+                        CategoryId = EnrichmentCategoryAudio,
+                        ActionName = "Listen",
+                        ActionPathName = "rdte-soundtrack.flac"
+                    },
+                    new
+                    {
+                        GameId = GameManualMedia,
+                        CategoryId = EnrichmentCategoryBook,
+                        ActionName = "Read",
+                        ActionPathName = "rdte-book.pdf"
+                    }
+                };
+
+                foreach (var expected in expectations)
+                {
+                    var game = PlayniteApi.Database.Games.Get(expected.GameId);
+                    if (game == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected enriched fixture game is unavailable: " +
+                            expected.GameId);
+                    }
+
+                    if (game.CategoryIds == null ||
+                        !game.CategoryIds.Contains(expected.CategoryId))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected native media category membership did not survive uninstall for " +
+                            game.Name + ".");
+                    }
+                    categoryMembershipCount++;
+
+                    var actions = game.GameActions == null
+                        ? new List<GameAction>()
+                        : game.GameActions
+                            .Where(action =>
+                                !action.IsPlayAction &&
+                                string.Equals(
+                                    action.Name,
+                                    expected.ActionName,
+                                    StringComparison.Ordinal) &&
+                                string.Equals(
+                                    Path.GetFileName(action.Path),
+                                    expected.ActionPathName,
+                                    StringComparison.Ordinal))
+                            .ToList();
+
+                    if (actions.Count != 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected native non-play media action did not survive uninstall for " +
+                            game.Name + ".");
+                    }
+                    actionCount++;
+                }
+
+                var presets = new[]
+                {
+                    new
+                    {
+                        Id = EnrichmentFilterPresetBooks,
+                        Name = EnrichmentFilterPresetBooksName,
+                        CategoryId = EnrichmentCategoryBook
+                    },
+                    new
+                    {
+                        Id = EnrichmentFilterPresetComics,
+                        Name = EnrichmentFilterPresetComicsName,
+                        CategoryId = EnrichmentCategoryComic
+                    },
+                    new
+                    {
+                        Id = EnrichmentFilterPresetAudio,
+                        Name = EnrichmentFilterPresetAudioName,
+                        CategoryId = EnrichmentCategoryAudio
+                    }
+                };
+
+                foreach (var expected in presets)
+                {
+                    var preset = PlayniteApi.Database.FilterPresets.Get(expected.Id);
+                    var categoryIds =
+                        preset == null ||
+                        preset.Settings == null ||
+                        preset.Settings.Category == null
+                            ? null
+                            : preset.Settings.Category.Ids;
+
+                    if (preset == null ||
+                        !string.Equals(
+                            preset.Name,
+                            expected.Name,
+                            StringComparison.Ordinal) ||
+                        categoryIds == null ||
+                        categoryIds.Count != 1 ||
+                        categoryIds[0] != expected.CategoryId)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected native media shelf did not survive uninstall: " +
+                            expected.Name + ".");
+                    }
+                    filterPresetCount++;
+                }
+
+                foreach (var gameId in new[] { GameBook, GameComic })
+                {
+                    var game = PlayniteApi.Database.Games.Get(gameId);
+                    if (game == null ||
+                        string.IsNullOrWhiteSpace(game.CoverImage))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected native CoverImage did not survive uninstall for " +
+                            gameId + ".");
+                    }
+
+                    var fullPath =
+                        PlayniteApi.Database.GetFullFilePath(game.CoverImage);
+                    if (string.IsNullOrWhiteSpace(fullPath) ||
+                        !File.Exists(fullPath))
+                    {
+                        throw new InvalidOperationException(
+                            "Native CoverImage database file is unavailable after uninstall for " +
+                            gameId + ".");
+                    }
+                    coverCount++;
+                }
+
+                var mediaFiles = new[]
+                {
+                    Path.Combine(fixturePath, "rdte-book.pdf"),
+                    Path.Combine(fixturePath, "rdte-book.epub"),
+                    Path.Combine(fixturePath, "rdte-comic.cbz"),
+                    Path.Combine(fixturePath, "rdte-soundtrack.flac")
+                };
+                localFilesPresent = mediaFiles.All(File.Exists);
+                if (!localFilesPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Local media evidence was removed or changed by plugin uninstall.");
+                }
+
+                detail =
+                    "Native categories, non-play actions, shelves, covers, and local media survived product uninstall.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "native-persistence-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-native-persistence-fixture/v1",
+                        result = result,
+                        category_memberships = categoryMembershipCount,
+                        custom_actions = actionCount,
+                        filter_presets = filterPresetCount,
+                        cover_images = coverCount,
+                        local_files_present = localFilesPresent,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunUserCategoryOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-category-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-category-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool bookMembershipPresent = false;
+            int otherManagedMemberships = 0;
+
+            try
+            {
+                var category = PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (category == null ||
+                    !string.Equals(category.Name, EnrichmentCategoryBookName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected managed Book category is unavailable or renamed.");
+                }
+                if (game == null)
+                {
+                    throw new InvalidOperationException("Humble Ebook fixture is unavailable.");
+                }
+
+                var categories = game.CategoryIds == null
+                    ? new List<Guid>()
+                    : new List<Guid>(game.CategoryIds);
+
+                if (remove)
+                {
+                    if (!categories.Contains(EnrichmentCategoryBook))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Book membership is absent before user-override injection.");
+                    }
+                    categories.Remove(EnrichmentCategoryBook);
+                    game.CategoryIds = categories;
+                    PlayniteApi.Database.Games.Update(game);
+                }
+                else if (restore && !categories.Contains(EnrichmentCategoryBook))
+                {
+                    categories.Add(EnrichmentCategoryBook);
+                    game.CategoryIds = categories;
+                    PlayniteApi.Database.Games.Update(game);
+                }
+
+                var verifiedBook = PlayniteApi.Database.Games.Get(GameBook);
+                bookMembershipPresent =
+                    verifiedBook != null &&
+                    verifiedBook.CategoryIds != null &&
+                    verifiedBook.CategoryIds.Contains(EnrichmentCategoryBook);
+
+                var comic = PlayniteApi.Database.Games.Get(GameComic);
+                var audio = PlayniteApi.Database.Games.Get(GameAudio);
+                var manualMedia = PlayniteApi.Database.Games.Get(GameManualMedia);
+                if (comic != null && comic.CategoryIds != null &&
+                    comic.CategoryIds.Contains(EnrichmentCategoryComic)) otherManagedMemberships++;
+                if (audio != null && audio.CategoryIds != null &&
+                    audio.CategoryIds.Contains(EnrichmentCategoryAudio)) otherManagedMemberships++;
+                if (manualMedia != null && manualMedia.CategoryIds != null &&
+                    manualMedia.CategoryIds.Contains(EnrichmentCategoryBook)) otherManagedMemberships++;
+
+                var expectedBookMembership = restore;
+                if (bookMembershipPresent != expectedBookMembership)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Book membership was not restored for fixture cleanup."
+                            : "User-removed Book membership was reasserted.");
+                }
+                if (otherManagedMemberships != 3)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed category memberships changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Book membership removed through Playnite SDK."
+                    : restore
+                        ? "Managed Book membership restored for fixture cleanup."
+                        : "User-removed Book membership remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-category-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-category-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        category_id = EnrichmentCategoryBook.ToString(),
+                        category_name = EnrichmentCategoryBookName,
+                        book_membership_present = bookMembershipPresent,
+                        other_managed_memberships = otherManagedMemberships,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunUserActionOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-action-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-action-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool bookActionPresent = false;
+            int otherManagedActions = 0;
+
+            try
+            {
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (game == null)
+                {
+                    throw new InvalidOperationException("Humble Ebook fixture is unavailable.");
+                }
+
+                var evidencePath = game.Manual ?? string.Empty;
+                var workingDir = Path.GetDirectoryName(evidencePath) ?? string.Empty;
+                Func<GameAction, bool> matchesManagedRead = action =>
+                    action != null &&
+                    action.Type == GameActionType.File &&
+                    !action.IsPlayAction &&
+                    string.Equals(action.Name, "Read", StringComparison.Ordinal) &&
+                    string.Equals(action.Path, evidencePath, StringComparison.Ordinal) &&
+                    string.Equals(action.WorkingDir ?? string.Empty, workingDir, StringComparison.Ordinal) &&
+                    string.IsNullOrEmpty(action.Arguments);
+
+                var actions = game.GameActions == null
+                    ? new List<GameAction>()
+                    : new List<GameAction>(game.GameActions);
+                var managedReads = actions.Where(matchesManagedRead).ToList();
+
+                if (remove)
+                {
+                    if (managedReads.Count != 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected exactly one managed Ebook Read action before user-override injection.");
+                    }
+
+                    actions.Remove(managedReads[0]);
+                    game.GameActions = new System.Collections.ObjectModel.ObservableCollection<GameAction>(actions);
+                    PlayniteApi.Database.Games.Update(game);
+                }
+                else if (restore && managedReads.Count == 0)
+                {
+                    actions.Add(new GameAction
+                    {
+                        Type = GameActionType.File,
+                        Name = "Read",
+                        Path = evidencePath,
+                        WorkingDir = workingDir,
+                        Arguments = string.Empty,
+                        IsPlayAction = false,
+                        TrackingMode = TrackingMode.Default
+                    });
+                    game.GameActions = new System.Collections.ObjectModel.ObservableCollection<GameAction>(actions);
+                    PlayniteApi.Database.Games.Update(game);
+                }
+
+                var verifiedBook = PlayniteApi.Database.Games.Get(GameBook);
+                bookActionPresent =
+                    verifiedBook != null &&
+                    verifiedBook.GameActions != null &&
+                    verifiedBook.GameActions.Any(matchesManagedRead);
+
+                var comic = PlayniteApi.Database.Games.Get(GameComic);
+                var audio = PlayniteApi.Database.Games.Get(GameAudio);
+                var manualMedia = PlayniteApi.Database.Games.Get(GameManualMedia);
+
+                if (HasManagedAction(comic, "Read")) otherManagedActions++;
+                if (HasManagedAction(audio, "Listen")) otherManagedActions++;
+                if (HasManagedAction(manualMedia, "Read")) otherManagedActions++;
+
+                var expectedBookAction = restore;
+                if (bookActionPresent != expectedBookAction)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Ebook Read action was not restored for fixture cleanup."
+                            : "User-removed Ebook Read action was reasserted.");
+                }
+                if (otherManagedActions != 3)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed custom actions changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Ebook Read action removed through Playnite SDK."
+                    : restore
+                        ? "Managed Ebook Read action restored for fixture cleanup."
+                        : "User-removed Ebook Read action remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-action-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-action-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        action_name = "Read",
+                        book_action_present = bookActionPresent,
+                        other_managed_actions = otherManagedActions,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private static bool HasManagedAction(Game game, string actionName)
+        {
+            if (game == null || game.GameActions == null)
+            {
+                return false;
+            }
+
+            return game.GameActions.Any(action =>
+                action != null &&
+                action.Type == GameActionType.File &&
+                !action.IsPlayAction &&
+                string.Equals(action.Name, actionName, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(action.Path) &&
+                string.IsNullOrEmpty(action.Arguments));
+        }
+
+        private void RunR4IConflictFixture(string dataPath, string fixtureProfile)
+        {
+            var category = PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+            var game = PlayniteApi.Database.Games.Get(GameManual);
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                if (category == null ||
+                    !string.Equals(
+                        category.Name,
+                        EnrichmentCategoryBookName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected plugin-owned Book category is unavailable or renamed.");
+                }
+
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Manual control game is unavailable.");
+                }
+
+                if (apply)
+                {
+                    var categories = game.CategoryIds == null
+                        ? new List<Guid>()
+                        : new List<Guid>(game.CategoryIds);
+
+                    if (!categories.Contains(EnrichmentCategoryBook))
+                    {
+                        categories.Add(EnrichmentCategoryBook);
+                        game.CategoryIds = categories;
+                        PlayniteApi.Database.Games.Update(game);
+                    }
+                }
+
+                var verified = PlayniteApi.Database.Games.Get(GameManual);
+                var membershipPresent =
+                    verified != null &&
+                    verified.CategoryIds != null &&
+                    verified.CategoryIds.Contains(EnrichmentCategoryBook);
+
+                if (!membershipPresent)
+                {
+                    throw new InvalidOperationException(
+                        "External manual-game category membership is not present.");
+                }
+
+                detail = apply
+                    ? "External membership applied and verified."
+                    : "External membership remains present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var currentCategory =
+                PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+            var currentGame = PlayniteApi.Database.Games.Get(GameManual);
+            var currentMembership =
+                currentGame != null &&
+                currentGame.CategoryIds != null &&
+                currentGame.CategoryIds.Contains(EnrichmentCategoryBook);
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        manual_game_id = GameManual.ToString(),
+                        category_id = EnrichmentCategoryBook.ToString(),
+                        category_name = currentCategory == null
+                            ? string.Empty
+                            : currentCategory.Name,
+                        membership_present = currentMembership,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunActionConflictFixture(
+            string dataPath,
+            string fixturePath,
+            string fixtureProfile)
+        {
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-action-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var externalPath = Path.Combine(fixturePath, "external-book.pdf");
+            EnsureFile(
+                externalPath,
+                "%PDF-1.4\n% SemperSupra external action conflict fixture\n");
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Humble Ebook fixture is unavailable.");
+                }
+
+                var readActions = game.GameActions == null
+                    ? new List<GameAction>()
+                    : game.GameActions
+                        .Where(action =>
+                            !action.IsPlayAction &&
+                            string.Equals(
+                                action.Name,
+                                "Read",
+                                StringComparison.Ordinal))
+                        .ToList();
+
+                if (apply)
+                {
+                    if (readActions.Count != 1)
+                    {
+                        throw new InvalidOperationException(
+                            "Expected exactly one plugin-projected custom Read action.");
+                    }
+
+                    readActions[0].Path = externalPath;
+                    readActions[0].WorkingDir = fixturePath;
+                    PlayniteApi.Database.Games.Update(game);
+                }
+
+                var verified = PlayniteApi.Database.Games.Get(GameBook);
+                var preserved = verified != null &&
+                    verified.GameActions != null &&
+                    verified.GameActions.Any(action =>
+                        !action.IsPlayAction &&
+                        string.Equals(action.Name, "Read", StringComparison.Ordinal) &&
+                        string.Equals(action.Path, externalPath, StringComparison.Ordinal));
+
+                if (!preserved)
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed custom Read action is not present.");
+                }
+
+                if (verified.Playtime != 0 ||
+                    verified.PlayCount != 0 ||
+                    verified.LastActivity.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        "Custom action projection changed gameplay activity semantics.");
+                }
+
+                detail = apply
+                    ? "External Read action mutation applied and verified."
+                    : "External Read action mutation remains present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var current = PlayniteApi.Database.Games.Get(GameBook);
+            var currentAction = current == null || current.GameActions == null
+                ? null
+                : current.GameActions.FirstOrDefault(action =>
+                    !action.IsPlayAction &&
+                    string.Equals(action.Name, "Read", StringComparison.Ordinal) &&
+                    string.Equals(action.Path, externalPath, StringComparison.Ordinal));
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "action-conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-action-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        action_name = currentAction == null
+                            ? string.Empty
+                            : currentAction.Name,
+                        action_path_name = currentAction == null
+                            ? string.Empty
+                            : Path.GetFileName(currentAction.Path),
+                        is_play_action = currentAction != null && currentAction.IsPlayAction,
+                        playtime = current == null ? 0UL : current.Playtime,
+                        play_count = current == null ? 0UL : current.PlayCount,
+                        last_activity_present =
+                            current != null && current.LastActivity.HasValue,
+                        last_activity =
+                            current != null && current.LastActivity.HasValue
+                                ? current.LastActivity.Value.ToString("o")
+                                : string.Empty,
+                        detail = detail
+                    },
+                    true));
+        }
+
+
+        private void RunUserFilterPresetOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-filter-preset-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-filter-preset-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool booksPresetPresent = false;
+            int otherManagedPresets = 0;
+
+            try
+            {
+                var preset =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+
+                if (remove)
+                {
+                    if (preset == null ||
+                        !string.Equals(
+                            preset.Name,
+                            EnrichmentFilterPresetBooksName,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected managed Books filter preset is unavailable before user-override injection.");
+                    }
+
+                    if (!PlayniteApi.Database.FilterPresets.Remove(EnrichmentFilterPresetBooks))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Books filter preset could not be removed through Playnite SDK.");
+                    }
+                }
+                else if (restore && preset == null)
+                {
+                    var category =
+                        PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+                    if (category == null ||
+                        !string.Equals(
+                            category.Name,
+                            EnrichmentCategoryBookName,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Book category is unavailable for Books shelf restoration.");
+                    }
+
+                    PlayniteApi.Database.FilterPresets.Add(new FilterPreset
+                    {
+                        Id = EnrichmentFilterPresetBooks,
+                        Name = EnrichmentFilterPresetBooksName,
+                        Settings = new FilterPresetSettings
+                        {
+                            UseAndFilteringStyle = true,
+                            Category = new IdItemFilterItemProperties(EnrichmentCategoryBook)
+                        },
+                        SortingOrder = SortOrder.Name,
+                        SortingOrderDirection = SortOrderDirection.Ascending,
+                        GroupingOrder = GroupableField.None,
+                        ShowInFullscreeQuickSelection = true
+                    });
+                }
+
+                var verified =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+                var categoryIds =
+                    verified == null ||
+                    verified.Settings == null ||
+                    verified.Settings.Category == null
+                        ? null
+                        : verified.Settings.Category.Ids;
+                booksPresetPresent =
+                    verified != null &&
+                    string.Equals(
+                        verified.Name,
+                        EnrichmentFilterPresetBooksName,
+                        StringComparison.Ordinal) &&
+                    categoryIds != null &&
+                    categoryIds.Count == 1 &&
+                    categoryIds[0] == EnrichmentCategoryBook;
+
+                if (PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetComics) != null)
+                {
+                    otherManagedPresets++;
+                }
+                if (PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetAudio) != null)
+                {
+                    otherManagedPresets++;
+                }
+
+                var expectedBooksPreset = restore;
+                if (booksPresetPresent != expectedBooksPreset)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Books filter preset was not restored for fixture cleanup."
+                            : "User-removed Books filter preset was reasserted.");
+                }
+                if (otherManagedPresets != 2)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed media shelves changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Books filter preset removed through Playnite SDK."
+                    : restore
+                        ? "Managed Books filter preset restored for fixture cleanup."
+                        : "User-removed Books filter preset remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-filter-preset-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-filter-preset-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        preset_id = EnrichmentFilterPresetBooks.ToString(),
+                        preset_name = EnrichmentFilterPresetBooksName,
+                        books_preset_present = booksPresetPresent,
+                        other_managed_presets = otherManagedPresets,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunFilterPresetConflictFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-filter-preset-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                var preset =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+                if (preset == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected plugin-owned Books filter preset is unavailable.");
+                }
+
+                if (apply)
+                {
+                    if (!string.Equals(
+                            preset.Name,
+                            EnrichmentFilterPresetBooksName,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Books filter preset is not in plugin-owned state before external mutation.");
+                    }
+
+                    preset.Name = ExternalFilterPresetBooksName;
+                    PlayniteApi.Database.FilterPresets.Update(preset);
+                }
+
+                var verified =
+                    PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+                var categoryIds =
+                    verified == null ||
+                    verified.Settings == null ||
+                    verified.Settings.Category == null
+                        ? null
+                        : verified.Settings.Category.Ids;
+
+                var preserved =
+                    verified != null &&
+                    string.Equals(
+                        verified.Name,
+                        ExternalFilterPresetBooksName,
+                        StringComparison.Ordinal) &&
+                    categoryIds != null &&
+                    categoryIds.Count == 1 &&
+                    categoryIds[0] == EnrichmentCategoryBook;
+
+                if (!preserved)
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed Books filter preset is not present.");
+                }
+
+                var category =
+                    PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+                if (category == null ||
+                    !string.Equals(
+                        category.Name,
+                        EnrichmentCategoryBookName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Books category referenced by external filter preset is unavailable.");
+                }
+
+                detail = apply
+                    ? "External Books filter-preset mutation applied and verified."
+                    : "External Books filter-preset mutation and referenced category remain present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var current =
+                PlayniteApi.Database.FilterPresets.Get(EnrichmentFilterPresetBooks);
+            var currentCategory =
+                PlayniteApi.Database.Categories.Get(EnrichmentCategoryBook);
+            var currentCategoryIds =
+                current == null ||
+                current.Settings == null ||
+                current.Settings.Category == null
+                    ? null
+                    : current.Settings.Category.Ids;
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "filter-preset-conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-filter-preset-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        preset_id = EnrichmentFilterPresetBooks.ToString(),
+                        preset_name = current == null
+                            ? string.Empty
+                            : current.Name,
+                        category_id = EnrichmentCategoryBook.ToString(),
+                        category_reference_present =
+                            currentCategoryIds != null &&
+                            currentCategoryIds.Count == 1 &&
+                            currentCategoryIds[0] == EnrichmentCategoryBook,
+                        category_present = currentCategory != null,
+                        detail = detail
+                    },
+                    true));
+        }
+
+
+        private void RunUserCoverOverrideFixture(
+            string dataPath,
+            string fixtureProfile)
+        {
+            var remove = string.Equals(
+                fixtureProfile,
+                "r4i-user-cover-override-remove-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var restore = string.Equals(
+                fixtureProfile,
+                "r4i-user-cover-override-restore-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var mode = remove ? "remove" : restore ? "restore" : "verify";
+            var statePath = Path.Combine(dataPath, "user-cover-override-prior.txt");
+
+            string result = "PASS";
+            string detail = string.Empty;
+            bool bookCoverPresent = false;
+            bool comicCoverPresent = false;
+
+            try
+            {
+                var book = PlayniteApi.Database.Games.Get(GameBook);
+                if (book == null)
+                {
+                    throw new InvalidOperationException(
+                        "Humble Ebook fixture is unavailable.");
+                }
+
+                if (remove)
+                {
+                    if (string.IsNullOrWhiteSpace(book.CoverImage))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected managed Ebook CoverImage before user-override injection.");
+                    }
+
+                    var fullPath = PlayniteApi.Database.GetFullFilePath(book.CoverImage);
+                    if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+                    {
+                        throw new InvalidOperationException(
+                            "Managed Ebook cover database file is unavailable before user override.");
+                    }
+
+                    File.WriteAllText(statePath, book.CoverImage);
+                    book.CoverImage = null;
+                    PlayniteApi.Database.Games.Update(book);
+                }
+                else if (restore && string.IsNullOrWhiteSpace(book.CoverImage))
+                {
+                    if (!File.Exists(statePath))
+                    {
+                        throw new InvalidOperationException(
+                            "Prior managed Ebook CoverImage state is unavailable for fixture cleanup.");
+                    }
+
+                    var priorCover = File.ReadAllText(statePath).Trim();
+                    var fullPath = PlayniteApi.Database.GetFullFilePath(priorCover);
+                    if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+                    {
+                        throw new InvalidOperationException(
+                            "Prior managed Ebook cover database file is unavailable for fixture cleanup.");
+                    }
+
+                    book.CoverImage = priorCover;
+                    PlayniteApi.Database.Games.Update(book);
+                }
+
+                var verifiedBook = PlayniteApi.Database.Games.Get(GameBook);
+                var verifiedComic = PlayniteApi.Database.Games.Get(GameComic);
+                bookCoverPresent =
+                    verifiedBook != null &&
+                    !string.IsNullOrWhiteSpace(verifiedBook.CoverImage);
+                comicCoverPresent =
+                    verifiedComic != null &&
+                    !string.IsNullOrWhiteSpace(verifiedComic.CoverImage);
+
+                var expectedBookCover = restore;
+                if (bookCoverPresent != expectedBookCover)
+                {
+                    throw new InvalidOperationException(
+                        restore
+                            ? "Managed Ebook CoverImage was not restored for fixture cleanup."
+                            : "User-cleared Ebook CoverImage was reasserted.");
+                }
+                if (!comicCoverPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Unrelated managed Comic CoverImage changed during user-override rep.");
+                }
+
+                detail = remove
+                    ? "Managed Ebook CoverImage cleared through Playnite SDK."
+                    : restore
+                        ? "Managed Ebook CoverImage restored for fixture cleanup."
+                        : "User-cleared Ebook CoverImage remains absent.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "user-cover-override-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-user-cover-override-fixture/v1",
+                        mode = mode,
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        book_cover_present = bookCoverPresent,
+                        comic_cover_present = comicCoverPresent,
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunCoverConflictFixture(
+            string dataPath,
+            string fixturePath,
+            string fixtureProfile)
+        {
+            var apply = string.Equals(
+                fixtureProfile,
+                "r4i-cover-conflict-apply-v1",
+                StringComparison.OrdinalIgnoreCase);
+            var externalPath = Path.Combine(fixturePath, "external-book-cover.png");
+            var statePath = Path.Combine(dataPath, "cover-conflict-state.txt");
+            EnsureBytes(
+                externalPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAwCAIAAAD/zu84AAAAMklEQVR4nO3NMQEAMAjAsDFxiEAdUjEBXyqgiex6l/3TOwAAAAAAAAAAAAAAAAAAYLkBNiIBoDCEHzMAAAAASUVORK5CYII="));
+
+            string result = "PASS";
+            string detail = string.Empty;
+
+            try
+            {
+                var game = PlayniteApi.Database.Games.Get(GameBook);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Humble Ebook fixture is unavailable.");
+                }
+
+                if (apply)
+                {
+                    if (string.IsNullOrWhiteSpace(game.CoverImage))
+                    {
+                        throw new InvalidOperationException(
+                            "Expected plugin-projected Book CoverImage before external mutation.");
+                    }
+
+                    var externalDatabasePath =
+                        PlayniteApi.Database.AddFile(externalPath, game.Id);
+                    game.CoverImage = externalDatabasePath;
+                    PlayniteApi.Database.Games.Update(game);
+                    File.WriteAllText(statePath, externalDatabasePath);
+                }
+
+                if (!File.Exists(statePath))
+                {
+                    throw new InvalidOperationException(
+                        "External cover state receipt is unavailable.");
+                }
+
+                var expectedDatabasePath = File.ReadAllText(statePath).Trim();
+                var verified = PlayniteApi.Database.Games.Get(GameBook);
+                var preserved =
+                    verified != null &&
+                    string.Equals(
+                        verified.CoverImage,
+                        expectedDatabasePath,
+                        StringComparison.Ordinal);
+
+                if (!preserved)
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed Book CoverImage is not present.");
+                }
+
+                var fullPath =
+                    PlayniteApi.Database.GetFullFilePath(expectedDatabasePath);
+                if (string.IsNullOrWhiteSpace(fullPath) ||
+                    !File.Exists(fullPath))
+                {
+                    throw new InvalidOperationException(
+                        "Externally changed Book cover database file is unavailable.");
+                }
+
+                detail = apply
+                    ? "External Book CoverImage mutation applied and verified."
+                    : "External Book CoverImage mutation remains present.";
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            var current = PlayniteApi.Database.Games.Get(GameBook);
+            File.WriteAllText(
+                Path.Combine(dataPath, "cover-conflict-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-r4i-cover-conflict-fixture/v1",
+                        mode = apply ? "apply" : "verify",
+                        result = result,
+                        book_game_id = GameBook.ToString(),
+                        cover_image_present =
+                            current != null &&
+                            !string.IsNullOrWhiteSpace(current.CoverImage),
+                        external_source_name = Path.GetFileName(externalPath),
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private void RunMleMenuControlQualification(string dataPath)
+        {
+            var result = "PASS";
+            var detail = string.Empty;
+            var menuSurface = false;
+            var previewNoMutation = false;
+            var applyEnabled = false;
+            var observePreservedState = false;
+            var rollbackReturnedToObserve = false;
+            var previewSummary = string.Empty;
+            var applySummary = string.Empty;
+            var observeSummary = string.Empty;
+            var rollbackSummary = string.Empty;
+
+            try
+            {
+                var extensionsDataDirectory = Directory.GetParent(dataPath);
+                if (extensionsDataDirectory == null ||
+                    extensionsDataDirectory.Parent == null)
+                {
+                    throw new InvalidOperationException(
+                        "Unable to resolve Playnite user-data root.");
+                }
+
+                var userData = extensionsDataDirectory.Parent.FullName;
+                var productData = Path.Combine(
+                    userData,
+                    "ExtensionsData",
+                    MediaLibraryEnrichmentPluginId.ToString());
+                var productAssemblyPath = Path.Combine(
+                    userData,
+                    "Extensions",
+                    MediaLibraryEnrichmentPluginId.ToString(),
+                    "MediaLibraryEnrichment.dll");
+
+                if (!File.Exists(productAssemblyPath))
+                {
+                    throw new InvalidOperationException(
+                        "Installed Media Library Enrichment assembly is unavailable.");
+                }
+
+                var assembly = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(candidate => string.Equals(
+                        candidate.GetName().Name,
+                        "MediaLibraryEnrichment",
+                        StringComparison.Ordinal));
+                if (assembly == null)
+                {
+                    assembly = Assembly.LoadFrom(productAssemblyPath);
+                }
+
+                var pluginType = assembly.GetType(
+                    "MediaLibraryEnrichment.MediaLibraryEnrichmentPlugin",
+                    true);
+                var plugin = Activator.CreateInstance(
+                    pluginType,
+                    new object[] { PlayniteApi });
+
+                var getMenuItems = pluginType.GetMethod(
+                    "GetMainMenuItems",
+                    BindingFlags.Instance | BindingFlags.Public);
+                var buildPreviewSummary = pluginType.GetMethod(
+                    "BuildPreviewSummary",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var executeModeCore = pluginType.GetMethod(
+                    "ExecuteModeCore",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+                if (getMenuItems == null ||
+                    buildPreviewSummary == null ||
+                    executeModeCore == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected menu command surface is unavailable.");
+                }
+
+                var menuItems = ((IEnumerable<MainMenuItem>)getMenuItems.Invoke(
+                    plugin,
+                    new object[] { null })).ToList();
+                var expectedDescriptions = new[]
+                {
+                    "Preview current enrichment",
+                    "Apply and enable reconciliation",
+                    "Observe only (disable changes)",
+                    "Rollback owned changes"
+                };
+
+                if (menuItems.Count != expectedDescriptions.Length ||
+                    !menuItems.Select(item => item.Description)
+                        .SequenceEqual(expectedDescriptions) ||
+                    menuItems.Any(item =>
+                        !string.Equals(
+                            item.MenuSection,
+                            "@Media Library Enrichment",
+                            StringComparison.Ordinal) ||
+                        item.Action == null))
+                {
+                    throw new InvalidOperationException(
+                        "Playnite menu surface does not expose the four bounded controls.");
+                }
+                menuSurface = true;
+
+                if (!string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Menu qualification must start in observe mode.");
+                }
+
+                var previewBefore = CaptureMleManagedState();
+                previewSummary = (string)buildPreviewSummary.Invoke(
+                    plugin,
+                    new object[0]);
+                var previewAfter = CaptureMleManagedState();
+
+                if (!string.Equals(
+                        previewBefore,
+                        previewAfter,
+                        StringComparison.Ordinal) ||
+                    !previewSummary.Contains("No changes were applied.") ||
+                    !previewSummary.Contains("Candidates: 4") ||
+                    !string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Preview mutated managed library state or changed mode.");
+                }
+                previewNoMutation = true;
+
+                applySummary = (string)executeModeCore.Invoke(
+                    plugin,
+                    new object[] { "apply", false });
+                AssertMleManagedState(true);
+                if (!string.Equals(
+                        ReadMleMode(productData),
+                        "apply",
+                        StringComparison.Ordinal) ||
+                    !applySummary.Contains("Mode: apply") ||
+                    !applySummary.Contains("Applied: 13"))
+                {
+                    throw new InvalidOperationException(
+                        "Apply command did not reconcile and persist apply mode.");
+                }
+                applyEnabled = true;
+
+                var observeBefore = CaptureMleManagedState();
+                observeSummary = (string)executeModeCore.Invoke(
+                    plugin,
+                    new object[] { "observe", false });
+                var observeAfter = CaptureMleManagedState();
+                AssertMleManagedState(true);
+                if (!string.Equals(
+                        observeBefore,
+                        observeAfter,
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal) ||
+                    !observeSummary.Contains("Mode: observe") ||
+                    !observeSummary.Contains("Applied: 0"))
+                {
+                    throw new InvalidOperationException(
+                        "Observe command changed managed state or failed to persist observe mode.");
+                }
+                observePreservedState = true;
+
+                rollbackSummary = (string)executeModeCore.Invoke(
+                    plugin,
+                    new object[] { "rollback", true });
+                AssertMleManagedState(false);
+                if (!string.Equals(
+                        ReadMleMode(productData),
+                        "observe",
+                        StringComparison.Ordinal) ||
+                    !rollbackSummary.Contains("Mode: rollback") ||
+                    !rollbackSummary.Contains("Rollback applied: 13") ||
+                    !rollbackSummary.Contains(
+                        "Mode returned to observe after rollback."))
+                {
+                    throw new InvalidOperationException(
+                        "Rollback command did not remove owned state and return to observe.");
+                }
+                rollbackReturnedToObserve = true;
+
+                detail =
+                    "Preview/apply/observe/rollback command cores passed against the real Playnite API.";
+            }
+            catch (TargetInvocationException exception)
+            {
+                result = "FAIL";
+                detail = exception.InnerException == null
+                    ? exception.Message
+                    : exception.InnerException.Message;
+            }
+            catch (Exception exception)
+            {
+                result = "FAIL";
+                detail = exception.Message;
+            }
+
+            File.WriteAllText(
+                Path.Combine(dataPath, "mle-menu-control-receipt.json"),
+                Serialization.ToJson(
+                    new
+                    {
+                        schema = "sempersupra-playnite-mle-menu-control/v1",
+                        result = result,
+                        menu_surface = menuSurface,
+                        preview_no_library_mutation = previewNoMutation,
+                        apply_enabled = applyEnabled,
+                        observe_preserved_state = observePreservedState,
+                        rollback_returned_to_observe = rollbackReturnedToObserve,
+                        preview_summary = previewSummary,
+                        apply_summary = applySummary,
+                        observe_summary = observeSummary,
+                        rollback_summary = rollbackSummary,
+                        final_managed_state = CaptureMleManagedState(),
+                        detail = detail
+                    },
+                    true));
+        }
+
+        private string ReadMleMode(string productData)
+        {
+            var settingsPath = Path.Combine(productData, "settings.json");
+            if (!File.Exists(settingsPath))
+            {
+                return string.Empty;
+            }
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                File.ReadAllText(settingsPath),
+                "\\\"Mode\\\"\\s*:\\s*\\\"(?<value>[^\\\"]*)\\\"");
+            return match.Success
+                ? match.Groups["value"].Value
+                : string.Empty;
+        }
+
+        private string CaptureMleManagedState()
+        {
+            var expectations = new[]
+            {
+                new
+                {
+                    GameId = GameBook,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameComic,
+                    CategoryId = EnrichmentCategoryComic,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-comic.cbz",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameAudio,
+                    CategoryId = EnrichmentCategoryAudio,
+                    ActionName = "Listen",
+                    ActionPathName = "rdte-soundtrack.flac",
+                    CoverExpected = false
+                },
+                new
+                {
+                    GameId = GameManualMedia,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = false
+                }
+            };
+
+            var parts = new List<string>();
+            foreach (var expected in expectations)
+            {
+                var game = PlayniteApi.Database.Games.Get(expected.GameId);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected menu-control fixture game is unavailable: " +
+                        expected.GameId);
+                }
+
+                var membershipPresent =
+                    game.CategoryIds != null &&
+                    game.CategoryIds.Contains(expected.CategoryId);
+                var actionCount = game.GameActions == null
+                    ? 0
+                    : game.GameActions.Count(action =>
+                        !action.IsPlayAction &&
+                        string.Equals(
+                            action.Name,
+                            expected.ActionName,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            Path.GetFileName(action.Path),
+                            expected.ActionPathName,
+                            StringComparison.Ordinal));
+                var coverPresent = !string.IsNullOrWhiteSpace(game.CoverImage);
+
+                parts.Add(
+                    expected.GameId + ":" +
+                    membershipPresent + ":" +
+                    actionCount + ":" +
+                    coverPresent);
+            }
+
+            foreach (var presetId in new[]
+            {
+                EnrichmentFilterPresetBooks,
+                EnrichmentFilterPresetComics,
+                EnrichmentFilterPresetAudio
+            })
+            {
+                var preset = PlayniteApi.Database.FilterPresets.Get(presetId);
+                parts.Add(
+                    "preset:" + presetId + ":" +
+                    (preset == null ? "absent" : preset.Name));
+            }
+
+            var ordinary = PlayniteApi.Database.Games.Get(GameManual);
+            if (ordinary == null)
+            {
+                throw new InvalidOperationException(
+                    "Ordinary manual-game control is unavailable.");
+            }
+            var ordinaryMemberships = ordinary.CategoryIds == null
+                ? 0
+                : ordinary.CategoryIds.Count(id =>
+                    id == EnrichmentCategoryBook ||
+                    id == EnrichmentCategoryComic ||
+                    id == EnrichmentCategoryAudio);
+            var ordinaryActions = ordinary.GameActions == null
+                ? 0
+                : ordinary.GameActions.Count(action =>
+                    string.Equals(action.Name, "Read", StringComparison.Ordinal) ||
+                    string.Equals(action.Name, "Listen", StringComparison.Ordinal));
+            parts.Add(
+                "ordinary:" + ordinaryMemberships + ":" + ordinaryActions);
+
+            return string.Join("|", parts);
+        }
+
+        private void AssertMleManagedState(bool expectedPresent)
+        {
+            var expectations = new[]
+            {
+                new
+                {
+                    GameId = GameBook,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameComic,
+                    CategoryId = EnrichmentCategoryComic,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-comic.cbz",
+                    CoverExpected = true
+                },
+                new
+                {
+                    GameId = GameAudio,
+                    CategoryId = EnrichmentCategoryAudio,
+                    ActionName = "Listen",
+                    ActionPathName = "rdte-soundtrack.flac",
+                    CoverExpected = false
+                },
+                new
+                {
+                    GameId = GameManualMedia,
+                    CategoryId = EnrichmentCategoryBook,
+                    ActionName = "Read",
+                    ActionPathName = "rdte-book.pdf",
+                    CoverExpected = false
+                }
+            };
+
+            foreach (var expected in expectations)
+            {
+                var game = PlayniteApi.Database.Games.Get(expected.GameId);
+                if (game == null)
+                {
+                    throw new InvalidOperationException(
+                        "Expected menu-control fixture game is unavailable.");
+                }
+
+                var membershipPresent =
+                    game.CategoryIds != null &&
+                    game.CategoryIds.Contains(expected.CategoryId);
+                var actionCount = game.GameActions == null
+                    ? 0
+                    : game.GameActions.Count(action =>
+                        !action.IsPlayAction &&
+                        string.Equals(
+                            action.Name,
+                            expected.ActionName,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            Path.GetFileName(action.Path),
+                            expected.ActionPathName,
+                            StringComparison.Ordinal));
+                var coverPresent = !string.IsNullOrWhiteSpace(game.CoverImage);
+
+                if (membershipPresent != expectedPresent ||
+                    (expectedPresent ? actionCount != 1 : actionCount != 0) ||
+                    (expected.CoverExpected &&
+                        coverPresent != expectedPresent))
+                {
+                    throw new InvalidOperationException(
+                        "Managed state does not match expected menu-command outcome for " +
+                        game.Name + ".");
+                }
+            }
+
+            foreach (var presetId in new[]
+            {
+                EnrichmentFilterPresetBooks,
+                EnrichmentFilterPresetComics,
+                EnrichmentFilterPresetAudio
+            })
+            {
+                var present =
+                    PlayniteApi.Database.FilterPresets.Get(presetId) != null;
+                if (present != expectedPresent)
+                {
+                    throw new InvalidOperationException(
+                        "Managed filter-preset state does not match menu-command outcome.");
+                }
+            }
+
+            var ordinary = PlayniteApi.Database.Games.Get(GameManual);
+            if (ordinary == null)
+            {
+                throw new InvalidOperationException(
+                    "Ordinary manual-game control is unavailable.");
+            }
+            if ((ordinary.CategoryIds != null &&
+                    ordinary.CategoryIds.Any(id =>
+                        id == EnrichmentCategoryBook ||
+                        id == EnrichmentCategoryComic ||
+                        id == EnrichmentCategoryAudio)) ||
+                (ordinary.GameActions != null &&
+                    ordinary.GameActions.Any(action =>
+                        string.Equals(
+                            action.Name,
+                            "Read",
+                            StringComparison.Ordinal) ||
+                        string.Equals(
+                            action.Name,
+                            "Listen",
+                            StringComparison.Ordinal))))
+            {
+                throw new InvalidOperationException(
+                    "Menu command mutated the ordinary manual-game control.");
+            }
+        }
+
         private static void EnsureFile(string path, string content)
         {
             if (!File.Exists(path) || File.ReadAllText(path) != content)
             {
                 File.WriteAllText(path, content);
+            }
+        }
+
+        private static void EnsureBytes(string path, byte[] content)
+        {
+            if (!File.Exists(path) ||
+                !File.ReadAllBytes(path).SequenceEqual(content))
+            {
+                File.WriteAllBytes(path, content);
             }
         }
 

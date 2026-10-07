@@ -1,0 +1,189 @@
+name: Release Media Library Enrichment v0.1.0
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-media-library-enrichment-v0.1.0.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create the public GitHub Release after exact qualification"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  syntax:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release workflow parsed successfully."
+
+  qualify-and-release:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Requalify exact release source
+        env:
+          RDTE_SOURCE_SHA: ${{ github.sha }}
+          RDTE_TRIGGER_SHA: ${{ github.sha }}
+          RDTE_PRODUCT_AUTHORITY_SHA: 3241837c36c5b061d59da9ab2322e2cf004f607f
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "media-library-enrichment-release"
+          $runtimeEvidence = Join-Path $evidence "runtime"
+
+          ./tooling/rdte/probe-playnite-runtime.ps1 `
+            -ManifestPath ./tooling/rdte/playnite-10.62.json `
+            -EvidenceDir $runtimeEvidence `
+            -ExerciseFixtureSeeder `
+            -FixtureProfile media-raw-v1
+
+          $workRoots = @(
+            Get-ChildItem $env:RUNNER_TEMP -Directory -Filter "playnite-runtime-*" |
+              Sort-Object LastWriteTimeUtc -Descending
+          )
+          if ($workRoots.Count -lt 1) {
+            throw "Unable to locate the disposable Playnite work root."
+          }
+          $workRoot = $workRoots[0].FullName
+          $toolboxes = @(Get-ChildItem (Join-Path $workRoot "runtime") -Filter "Toolbox.exe" -File -Recurse)
+          if ($toolboxes.Count -ne 1) {
+            throw "Expected exactly one pinned Toolbox.exe, found $($toolboxes.Count)."
+          }
+          "MLE_TOOLBOX=$($toolboxes[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $metadataUtilitiesPackage = Join-Path $env:RUNNER_TEMP "MetadataUtilities_485ab5f0-bfb1-4c17-93cc-20d8338673be_1_9_0.pext"
+          Invoke-WebRequest -Uri "https://github.com/HerrKnarz/Playnite-Extensions/releases/download/2026-09-29/MetadataUtilities_485ab5f0-bfb1-4c17-93cc-20d8338673be_1_9_0.pext" -OutFile $metadataUtilitiesPackage
+          $metadataUtilitiesSha256 = (Get-FileHash -Path $metadataUtilitiesPackage -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($metadataUtilitiesSha256 -ne "8b5c3ce5b5aeb3eb1d476083f36aaa5fa58498d3f366666b7ddc56cc40400cf8") {
+            throw "Pinned Metadata Utilities package SHA-256 mismatch."
+          }
+
+          $productEvidence = Join-Path $evidence "media-library-enrichment"
+          ./tooling/rdte/qualify-media-library-enrichment.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir $productEvidence `
+            -KeepInstalledForConflict
+
+          ./tooling/rdte/qualify-media-library-enrichment-menu.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir $productEvidence
+
+          ./tooling/rdte/qualify-media-library-enrichment-conflict.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir $productEvidence `
+            -MetadataUtilitiesPackage $metadataUtilitiesPackage
+
+          ./tooling/rdte/qualify-media-library-enrichment-scale.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir $productEvidence
+
+          $qualifiedPackage = Join-Path $productEvidence "MediaLibraryEnrichment-0.1.0.pext"
+          if (-not (Test-Path $qualifiedPackage -PathType Leaf)) {
+            throw "Qualified package was not produced."
+          }
+
+          $actual = (Get-FileHash $qualifiedPackage -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ([string]::IsNullOrWhiteSpace($actual) -or $actual.Length -ne 64) {
+            throw "Unable to compute the exact release package SHA-256."
+          }
+          "MLE_RELEASE_SHA256=$actual" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $releaseDir = Join-Path $env:RUNNER_TEMP "media-library-enrichment-release-asset"
+          New-Item $releaseDir -ItemType Directory -Force | Out-Null
+          $releaseName = "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext"
+          $releasePath = Join-Path $releaseDir $releaseName
+          Copy-Item $qualifiedPackage $releasePath -Force
+          "$actual  $releaseName" | Set-Content (Join-Path $releaseDir "$releaseName.sha256") -Encoding ascii
+
+      - name: Upload qualified release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: media-library-enrichment-v0.1.0-release-candidate
+          path: ${{ runner.temp }}/media-library-enrichment-release-asset
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish and verify GitHub Release
+        if: ${{ inputs.publish }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:GITHUB_REF -ne "refs/heads/main") {
+            throw "Publication is allowed only from public main."
+          }
+
+          $tag = "media-library-enrichment-v0.1.0"
+          $assetDir = Join-Path $env:RUNNER_TEMP "media-library-enrichment-release-asset"
+          $releaseName = "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext"
+          $assetPath = Join-Path $assetDir $releaseName
+          $checksumPath = Join-Path $assetDir "$releaseName.sha256"
+          $notes = Join-Path $env:RUNNER_TEMP "mle-release-notes.md"
+          @(
+            "Media Library Enrichment v0.1.0",
+            "",
+            "Initial public release for Playnite 10.",
+            "",
+            "- Safe, ownership-aware enrichment for conservatively admitted books, comics, and audio.",
+            "- Native Playnite categories, shelves, covers, and non-Play Read/Listen actions.",
+            "- Preserves user overrides and external changes.",
+            "- Uses Windows registered/default handlers for media files.",
+            "- Qualified with Metadata Utilities 1.9.0.",
+            "- Qualified against libraries containing more than 10,000 records.",
+            "",
+            "Exact release package SHA-256:",
+            $env:MLE_RELEASE_SHA256
+          ) | Set-Content $notes -Encoding utf8
+
+          # Publish as a prerelease first so Playnite Toolbox can verify the
+          # real public PackageUrl and InstallerManifestUrl before promotion.
+          gh release create $tag `
+            $assetPath `
+            $checksumPath `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title "Media Library Enrichment v0.1.0" `
+            --notes-file $notes `
+            --prerelease
+
+          $assetUrl = "https://github.com/SemperSupra/playnite-extensions/releases/download/$tag/$releaseName"
+          $deadline = [DateTime]::UtcNow.AddSeconds(45)
+          $reachable = $false
+          while ([DateTime]::UtcNow -lt $deadline) {
+            try {
+              $response = Invoke-WebRequest -Uri $assetUrl -Method Head -MaximumRedirection 8
+              if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+                $reachable = $true
+                break
+              }
+            }
+            catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $reachable) {
+            throw "Published prerelease asset did not become reachable."
+          }
+
+          & $env:MLE_TOOLBOX verify installer (Resolve-Path "./plugins/media-library-enrichment/InstallerManifest.yaml")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Playnite Toolbox rejected the published installer manifest."
+          }
+
+          & $env:MLE_TOOLBOX verify addon (Resolve-Path "./plugins/media-library-enrichment/distribution/PlayniteAddonDatabase.yaml")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Playnite Toolbox rejected the published add-on manifest."
+          }
+
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --prerelease=false --latest

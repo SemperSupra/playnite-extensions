@@ -1,0 +1,88 @@
+name: Media Library Enrichment Release Metadata
+
+on:
+  pull_request:
+    paths:
+      - "plugins/media-library-enrichment/extension.yaml"
+      - "plugins/media-library-enrichment/InstallerManifest.yaml"
+      - "plugins/media-library-enrichment/distribution/**"
+      - "plugins/media-library-enrichment/src/MediaLibraryEnrichment/MediaLibraryEnrichment.csproj"
+      - ".github/workflows/verify-media-library-enrichment-release-metadata.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "plugins/media-library-enrichment/extension.yaml"
+      - "plugins/media-library-enrichment/InstallerManifest.yaml"
+      - "plugins/media-library-enrichment/distribution/**"
+      - "plugins/media-library-enrichment/src/MediaLibraryEnrichment/MediaLibraryEnrichment.csproj"
+      - ".github/workflows/verify-media-library-enrichment-release-metadata.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify pre-release metadata contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $evidence = Join-Path $env:RUNNER_TEMP "mle-release-metadata"
+          New-Item $evidence -ItemType Directory -Force | Out-Null
+
+          $extensionPath = Resolve-Path "./plugins/media-library-enrichment/extension.yaml"
+          $installerPath = Resolve-Path "./plugins/media-library-enrichment/InstallerManifest.yaml"
+          $addonPath = Resolve-Path "./plugins/media-library-enrichment/distribution/PlayniteAddonDatabase.yaml"
+          $projectPath = Resolve-Path "./plugins/media-library-enrichment/src/MediaLibraryEnrichment/MediaLibraryEnrichment.csproj"
+
+          $extension = Get-Content $extensionPath -Raw
+          $installer = Get-Content $installerPath -Raw
+          $addon = Get-Content $addonPath -Raw
+          $project = Get-Content $projectPath -Raw
+
+          $id = "4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377"
+          $version = "0.1.0"
+          $api = "6.16.0"
+          $releaseAsset = "https://github.com/SemperSupra/playnite-extensions/releases/download/media-library-enrichment-v0.1.0/4d1dfe5e-5df3-4a8d-bc0b-b6c2f9ab1377_0_1_0.pext"
+          $installerUrl = "https://raw.githubusercontent.com/SemperSupra/playnite-extensions/main/plugins/media-library-enrichment/InstallerManifest.yaml"
+
+          if ($extension -notmatch "(?m)^Id:\s+$([regex]::Escape($id))\s*$") { throw "extension.yaml ID mismatch." }
+          if ($extension -notmatch "(?m)^Version:\s+$([regex]::Escape($version))\s*$") { throw "extension.yaml version mismatch." }
+          if ($installer -notmatch "AddonId:\s*'$([regex]::Escape($id))'") { throw "Installer AddonId mismatch." }
+          if ($installer -notmatch "Version:\s+$([regex]::Escape($version))") { throw "Installer version mismatch." }
+          if ($installer -notmatch "RequiredApiVersion:\s+$([regex]::Escape($api))") { throw "Installer API version mismatch." }
+          if (-not $installer.Contains($releaseAsset)) { throw "Installer PackageUrl mismatch." }
+          if ($addon -notmatch "AddonId:\s*'$([regex]::Escape($id))'") { throw "Addon database ID mismatch." }
+          if ($addon -notmatch "(?m)^Type:\s+Generic\s*$") { throw "Addon database type mismatch." }
+          if (-not $addon.Contains($installerUrl)) { throw "Addon database InstallerManifestUrl mismatch." }
+          if ($project -notmatch 'PackageReference Include="PlayniteSDK" Version="6\.16\.0"') { throw "PlayniteSDK/API release contract mismatch." }
+
+          [ordered]@{
+            schema = "sempersupra-mle-release-metadata/v1"
+            result = "PASS"
+            source_sha = "${{ github.event.pull_request.head.sha || github.sha }}"
+            addon_id = $id
+            version = $version
+            required_api_version = $api
+            release_asset_url = $releaseAsset
+            installer_manifest_url = $installerUrl
+            toolbox_verify_installer = "DEFERRED_UNTIL_RELEASE_ASSET_IS_REACHABLE"
+          } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $evidence "release-metadata-receipt.json") -Encoding utf8
+
+      - name: Upload release metadata evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mle-release-metadata-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mle-release-metadata
+          if-no-files-found: error
+          retention-days: 30
