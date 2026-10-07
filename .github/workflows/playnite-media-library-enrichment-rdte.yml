@@ -58,6 +58,10 @@ jobs:
             -EvidenceDir (Join-Path $evidence "media-library-enrichment") `
             -KeepInstalledForConflict
 
+          ./tooling/rdte/qualify-media-library-enrichment-menu.ps1 `
+            -WorkRoot $workRoot `
+            -EvidenceDir (Join-Path $evidence "media-library-enrichment")
+
           ./tooling/rdte/qualify-media-library-enrichment-conflict.ps1 `
             -WorkRoot $workRoot `
             -EvidenceDir (Join-Path $evidence "media-library-enrichment") `
