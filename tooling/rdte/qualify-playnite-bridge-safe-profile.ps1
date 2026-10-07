@@ -242,19 +242,35 @@ try {
         throw "Playnite Bridge did not materialize through native install."
     }
 
-    $log = Get-Content $logPath -Raw
-    $listenerMatch = [regex]::Matches(
-        $log,
-        "HTTP server listening on (?<prefix>http://[^\s]+/)")
-    if ($listenerMatch.Count -lt 1) {
-        throw "No Playnite Bridge HTTP listener oracle was found."
-    }
-    $listenerPrefix = $listenerMatch[$listenerMatch.Count - 1].Groups["prefix"].Value
-    $receipt.observations.listener_prefix = $listenerPrefix
-    $receipt.observations.network_wide_listener = (
-        $listenerPrefix.Contains("+:") -or $listenerPrefix.Contains("*:")
+    $tcp = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+    $receipt.observations.tcp_listener_count = $tcp.Count
+    $receipt.observations.tcp_listener_addresses = @(
+        $tcp | ForEach-Object LocalAddress | Sort-Object -Unique
     )
 
+    $lanProbeSucceeded = $false
+    $lanCandidates = @(
+        Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -ne "127.0.0.1" -and
+                -not $_.IPAddress.StartsWith("169.254.")
+            } |
+            ForEach-Object IPAddress |
+            Sort-Object -Unique
+    )
+    foreach ($candidate in $lanCandidates) {
+        try {
+            $uri = "http://${candidate}:$port/api/app/info"
+            $lanProbe = Invoke-WebRequest -Uri $uri -Method GET -SkipHttpErrorCheck -UseBasicParsing -TimeoutSec 2
+            if ($lanProbe.StatusCode -eq 401) {
+                $lanProbeSucceeded = $true
+                break
+            }
+        }
+        catch {}
+    }
+    $receipt.observations.network_wide_listener = $lanProbeSucceeded
+    $receipt.observations.non_loopback_probe_count = $lanCandidates.Count
     $auth = Get-Content $authPath -Raw | ConvertFrom-Json
     $token = [string]$auth.token
     if ([string]::IsNullOrWhiteSpace($token) -or -not $token.StartsWith("pb_")) {
