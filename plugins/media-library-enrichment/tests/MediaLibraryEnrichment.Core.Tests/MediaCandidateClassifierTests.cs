@@ -20,6 +20,23 @@ namespace MediaLibraryEnrichment.Core.Tests
         }
 
         [Theory]
+        [InlineData("book.pdf", null, "supported Manual extension")]
+        [InlineData("comic.cbz", "some notes", "supported Manual extension")]
+        [InlineData(null, "fixture: soundtrack.flac", "supported Notes extension")]
+        [InlineData("", "fixture: book.epub", "supported Notes extension")]
+        [InlineData(null, null, "no local evidence")]
+        [InlineData("", "   ", "no local evidence")]
+        [InlineData("readme.txt", "nothing useful", "no supported extension")]
+        [InlineData(null, @"fixture: C:\\media\\fake.pdfx", "no supported extension")]
+        public void ReportsDeterministicClassificationReasons(
+            string manualPath,
+            string notes,
+            string expectedReason)
+        {
+            Assert.Equal(expectedReason, MediaCandidateClassifier.ClassifyReason(manualPath, notes));
+        }
+
+        [Theory]
         [InlineData(@"C:\runner-a\fixture\rdte-book.pdf", "rdte-book.pdf")]
         [InlineData(@"D:\runner-b\other\rdte-book.pdf", "rdte-book.pdf")]
         [InlineData("/tmp/runner-c/fixture/rdte-comic.cbz", "rdte-comic.cbz")]
