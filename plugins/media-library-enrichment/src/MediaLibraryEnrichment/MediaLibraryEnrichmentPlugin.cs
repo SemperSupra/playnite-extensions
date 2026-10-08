@@ -219,6 +219,9 @@ namespace MediaLibraryEnrichment
                         Kind = MediaCandidateClassifier.ClassifyKind(
                             game.Manual,
                             game.Notes),
+                        ClassificationReason = MediaCandidateClassifier.ClassifyReason(
+                            game.Manual,
+                            game.Notes),
                         LocalEvidenceName =
                             MediaCandidateClassifier.NormalizeLocalEvidenceName(
                                 game.Manual),
