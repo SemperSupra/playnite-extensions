@@ -1,0 +1,10 @@
+{
+  "schema": "mle-synthetic-coverage/v1",
+  "candidate_count": 3,
+  "kinds": {
+    "unresolved": 1,
+    "book": 1,
+    "comic": 1
+  },
+  "source": "synthetic-only"
+}
