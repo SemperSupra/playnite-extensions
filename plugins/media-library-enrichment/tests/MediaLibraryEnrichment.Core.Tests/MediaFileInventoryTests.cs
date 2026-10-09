@@ -90,6 +90,19 @@ namespace MediaLibraryEnrichment.Core.Tests
         }
 
         [Fact]
+        public void RejectsWindowsDriveRelativeAndCurrentDrivePaths()
+        {
+            if (Path.DirectorySeparatorChar != '\\')
+            {
+                return; // Windows-only path semantics; separate Windows CI proves this.
+            }
+            Assert.Throws<ArgumentException>(() =>
+                MediaFileInventory.InspectImmediateFiles(@"C:relative-folder"));
+            Assert.Throws<ArgumentException>(() =>
+                MediaFileInventory.InspectImmediateFiles(@"\rooted-on-current-drive"));
+        }
+
+        [Fact]
         public void RejectsMissingRootAndInvalidLimit()
         {
             Assert.Throws<DirectoryNotFoundException>(() =>
