@@ -160,6 +160,7 @@ try {
         $receipt.result -ne "PASS" -or
         $receipt.menu_surface -ne $true -or
         $receipt.preview_no_library_mutation -ne $true -or
+        $receipt.inventory_preview_no_library_mutation -ne $true -or
         $receipt.apply_enabled -ne $true -or
         $receipt.observe_preserved_state -ne $true -or
         $receipt.rollback_returned_to_observe -ne $true) {

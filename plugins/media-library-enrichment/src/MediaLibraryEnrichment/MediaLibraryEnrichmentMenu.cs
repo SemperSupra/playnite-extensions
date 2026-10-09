@@ -24,6 +24,13 @@ namespace MediaLibraryEnrichment
             yield return new MainMenuItem
             {
                 MenuSection = MenuSectionName,
+                Description = "Inspect selected directory (read-only)",
+                Action = _ => ShowLocalInventoryPreview()
+            };
+
+            yield return new MainMenuItem
+            {
+                MenuSection = MenuSectionName,
                 Description = "Apply and enable reconciliation",
                 Action = _ => ExecuteMode("apply", false)
             };

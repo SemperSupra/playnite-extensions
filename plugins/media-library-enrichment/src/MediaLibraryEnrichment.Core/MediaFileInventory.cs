@@ -25,6 +25,22 @@ namespace MediaLibraryEnrichment
             {
                 throw new ArgumentException("Relative scan roots are prohibited.", nameof(explicitRoot));
             }
+            // On Windows Path.IsPathRooted accepts C:child and \child although
+            // neither path is fully qualified. Never resolve them against the
+            // process drive or current directory.
+            if (Path.DirectorySeparatorChar == '\\')
+            {
+                var isDriveQualified =
+                    explicitRoot.Length >= 3 &&
+                    ((explicitRoot[0] >= 'A' && explicitRoot[0] <= 'Z') ||
+                     (explicitRoot[0] >= 'a' && explicitRoot[0] <= 'z')) &&
+                    explicitRoot[1] == ':' &&
+                    (explicitRoot[2] == '\\' || explicitRoot[2] == '/');
+                if (!isDriveQualified)
+                {
+                    throw new ArgumentException("A fully qualified local drive path is required.", nameof(explicitRoot));
+                }
+            }
 
             var root = Path.GetFullPath(explicitRoot);
             if (root.StartsWith(@"\\", StringComparison.Ordinal) ||
