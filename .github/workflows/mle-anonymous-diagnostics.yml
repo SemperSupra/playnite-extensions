@@ -1,0 +1,29 @@
+name: MLE anonymous diagnostics RDTE
+on:
+  pull_request:
+    paths:
+      - 'tooling/rdte/summarize_observations.py'
+      - 'tooling/rdte/test_summarize_observations.py'
+      - 'tooling/rdte/fixtures/mle-synthetic-observation.json'
+      - '.github/workflows/mle-anonymous-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mle-anonymous-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test anonymous coverage and fail-closed receipt checks
+        run: python3 -m unittest discover -s tooling/rdte -p 'test_summarize_observations.py' -v
+      - name: Reproduce synthetic aggregate without exposing individual items
+        run: python3 tooling/rdte/summarize_observations.py tooling/rdte/fixtures/mle-synthetic-observation.json

@@ -1,0 +1,74 @@
+{
+  "Schema": "sempersupra-media-library-enrichment-observation/v1",
+  "FixtureContract": "synthetic-anonymous-observation-v1",
+  "CandidateCount": 6,
+  "Candidates": [
+    {
+      "Kind": "unresolved",
+      "ClassificationReason": "NO_LOCAL_EVIDENCE",
+      "EvidenceFieldsPresent": [],
+      "CoverMissing": true,
+      "LocalEvidenceName": "",
+      "LocalEvidenceNames": []
+    },
+    {
+      "Kind": "unresolved",
+      "ClassificationReason": "NO_LOCAL_EVIDENCE",
+      "EvidenceFieldsPresent": [
+        "description",
+        "links"
+      ],
+      "CoverMissing": true,
+      "LocalEvidenceName": "",
+      "LocalEvidenceNames": []
+    },
+    {
+      "Kind": "unresolved",
+      "ClassificationReason": "NO_SUPPORTED_MEDIA_EXTENSION",
+      "EvidenceFieldsPresent": [
+        "notes"
+      ],
+      "CoverMissing": true,
+      "LocalEvidenceName": "",
+      "LocalEvidenceNames": []
+    },
+    {
+      "Kind": "book",
+      "ClassificationReason": "SUPPORTED_MANUAL_EXTENSION",
+      "EvidenceFieldsPresent": [
+        "manual"
+      ],
+      "CoverMissing": false,
+      "LocalEvidenceName": "sample.epub",
+      "LocalEvidenceNames": [
+        "sample.epub"
+      ]
+    },
+    {
+      "Kind": "comic",
+      "ClassificationReason": "SUPPORTED_NOTES_EXTENSION",
+      "EvidenceFieldsPresent": [
+        "notes",
+        "roms"
+      ],
+      "CoverMissing": false,
+      "LocalEvidenceName": "",
+      "LocalEvidenceNames": [
+        "sample.cbz"
+      ]
+    },
+    {
+      "Kind": "audio",
+      "ClassificationReason": "SUPPORTED_NOTES_EXTENSION",
+      "EvidenceFieldsPresent": [
+        "notes",
+        "game-actions"
+      ],
+      "CoverMissing": true,
+      "LocalEvidenceName": "",
+      "LocalEvidenceNames": [
+        "sample.flac"
+      ]
+    }
+  ]
+}
