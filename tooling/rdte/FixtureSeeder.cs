@@ -1775,6 +1775,7 @@ namespace SemperSupraRdteSeeder
             var detail = string.Empty;
             var menuSurface = false;
             var previewNoMutation = false;
+            var inventoryPreviewNoMutation = false;
             var applyEnabled = false;
             var observePreservedState = false;
             var rollbackReturnedToObserve = false;
@@ -1836,9 +1837,13 @@ namespace SemperSupraRdteSeeder
                 var executeModeCore = pluginType.GetMethod(
                     "ExecuteModeCore",
                     BindingFlags.Instance | BindingFlags.NonPublic);
+                var buildLocalInventoryPreview = pluginType.GetMethod(
+                    "BuildLocalInventoryPreviewSummary",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
 
                 if (getMenuItems == null ||
                     buildPreviewSummary == null ||
+                    buildLocalInventoryPreview == null ||
                     executeModeCore == null)
                 {
                     throw new InvalidOperationException(
@@ -1902,6 +1907,35 @@ namespace SemperSupraRdteSeeder
                         "Preview mutated managed library state or changed mode.");
                 }
                 previewNoMutation = true;
+
+                var syntheticRoot = Path.Combine(dataPath, "mle-inspection-rdte");
+                Directory.CreateDirectory(syntheticRoot);
+                try
+                {
+                    File.WriteAllText(Path.Combine(syntheticRoot, "testbook.epub"), "");
+                    File.WriteAllText(Path.Combine(syntheticRoot, "track.flac"), "");
+                    File.WriteAllText(Path.Combine(syntheticRoot, "control.txt"), "");
+                    var inventoryBefore = CaptureMleManagedState();
+                    var inventorySummary = (string)buildLocalInventoryPreview.Invoke(
+                        plugin, new object[] { syntheticRoot });
+                    var inventoryAfter = CaptureMleManagedState();
+                    if (!string.Equals(inventoryBefore, inventoryAfter, StringComparison.Ordinal) ||
+                        !inventorySummary.Contains("Read-only inspection complete.") ||
+                        !inventorySummary.Contains("Entries examined: 3") ||
+                        !inventorySummary.Contains("Supported media filenames: 2") ||
+                        !inventorySummary.Contains("Kinds: audio=1, book=1") ||
+                        inventorySummary.Contains("testbook.epub") ||
+                        !string.Equals(ReadMleMode(productData), "observe", StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Read-only local inventory changed managed state or leaked a filename.");
+                    }
+                    inventoryPreviewNoMutation = true;
+                }
+                finally
+                {
+                    Directory.Delete(syntheticRoot, true);
+                }
 
                 applySummary = (string)executeModeCore.Invoke(
                     plugin,
@@ -1984,6 +2018,7 @@ namespace SemperSupraRdteSeeder
                         result = result,
                         menu_surface = menuSurface,
                         preview_no_library_mutation = previewNoMutation,
+                        inventory_preview_no_library_mutation = inventoryPreviewNoMutation,
                         apply_enabled = applyEnabled,
                         observe_preserved_state = observePreservedState,
                         rollback_returned_to_observe = rollbackReturnedToObserve,
