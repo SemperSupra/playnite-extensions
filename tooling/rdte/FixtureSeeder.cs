@@ -1851,6 +1851,7 @@ namespace SemperSupraRdteSeeder
                 var expectedDescriptions = new[]
                 {
                     "Preview current enrichment",
+                    "Inspect selected directory (read-only)",
                     "Apply and enable reconciliation",
                     "Observe only (disable changes)",
                     "Rollback owned changes"
@@ -1867,7 +1868,7 @@ namespace SemperSupraRdteSeeder
                         item.Action == null))
                 {
                     throw new InvalidOperationException(
-                        "Playnite menu surface does not expose the four bounded controls.");
+                        "Playnite menu surface does not expose the five bounded controls.");
                 }
                 menuSurface = true;
 
