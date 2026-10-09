@@ -185,6 +185,23 @@ function Assert-ObservationReceipt {
         if (-not $candidate.CoverMissing) {
             throw "Candidate '$($candidate.Name)' does not have the expected missing-cover state."
         }
+        if ($candidate.ClassificationReason -notin @(
+                "supported Manual extension", "supported Notes extension")) {
+            throw "Expected positive diagnostic reason for an admitted synthetic media item."
+        }
+        if ($candidate.PSObject.Properties.Name -notcontains "EvidenceFieldsPresent" -or
+            $null -eq $candidate.EvidenceFieldsPresent) {
+            throw "Observation receipt must carry bounded metadata field-presence evidence."
+        }
+        $present = @($candidate.EvidenceFieldsPresent)
+        if (@($present | Where-Object { $_ -notin @(
+                "manual", "notes", "description", "install-directory",
+                "links", "game-actions", "roms") }).Count -gt 0) {
+            throw "Observation contains an unexpected field-presence identifier."
+        }
+        if (@($present | Where-Object { $_ -in @("manual", "notes") }).Count -eq 0) {
+            throw "Synthetic classified media must be supported by Manual or Notes presence."
+        }
 
         $actualVariants = @($candidate.LocalEvidenceNames | Sort-Object)
         $expectedVariants = @($want.Variants | Sort-Object)

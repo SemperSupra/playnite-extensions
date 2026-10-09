@@ -17,6 +17,28 @@ namespace MediaLibraryEnrichment
             return ClassifyText(notes);
         }
 
+        public static string ClassifyReason(string manualPath, string notes)
+        {
+            var fromPath = ClassifyPath(manualPath);
+            if (!string.Equals(fromPath, "unresolved", StringComparison.Ordinal))
+            {
+                return "supported Manual extension";
+            }
+
+            var fromNotes = ClassifyText(notes);
+            if (!string.Equals(fromNotes, "unresolved", StringComparison.Ordinal))
+            {
+                return "supported Notes extension";
+            }
+
+            if (string.IsNullOrWhiteSpace(manualPath) && string.IsNullOrWhiteSpace(notes))
+            {
+                return "no local evidence";
+            }
+
+            return "no supported extension";
+        }
+
         public static string NormalizeLocalEvidenceName(string path)
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -258,6 +280,9 @@ namespace MediaLibraryEnrichment
         public string Name { get; set; }
         public string Source { get; set; }
         public string Kind { get; set; }
+        public string ClassificationReason { get; set; }
+        // Presence identifiers only; never field values.
+        public string[] EvidenceFieldsPresent { get; set; }
         public string LocalEvidenceName { get; set; }
         public string[] LocalEvidenceNames { get; set; }
         public string AdmissionEvidenceKey { get; set; }

@@ -87,6 +87,22 @@ namespace MediaLibraryEnrichment
                     .OrderBy(group => group.Key, StringComparer.Ordinal)
                     .Select(group => group.Key + "=" + group.Count()));
 
+            var reasonSummary = string.Join(
+                ", ",
+                candidates
+                    .GroupBy(item => item.ClassificationReason ?? "unresolved")
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .Select(group => group.Key + "=" + group.Count()));
+
+            var evidenceFieldSummary = string.Join(
+                ", ",
+                candidates
+                    .SelectMany(item => item.EvidenceFieldsPresent ?? new string[0])
+                    .GroupBy(field => field, StringComparer.Ordinal)
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .Select(group => group.Key + "=" + group.Count()));
+            var missingCovers = candidates.Count(item => item.CoverMissing);
+
             var planned =
                 categoryPlan.Count(item => string.Equals(
                     item.Outcome,
@@ -134,6 +150,13 @@ namespace MediaLibraryEnrichment
                 "Kinds: " + (string.IsNullOrEmpty(kindSummary)
                     ? "none"
                     : kindSummary) + "\n" +
+                "Classification reasons: " + (string.IsNullOrEmpty(reasonSummary)
+                    ? "none"
+                    : reasonSummary) + "\n" +
+                "Fields present: " + (string.IsNullOrEmpty(evidenceFieldSummary)
+                    ? "none"
+                    : evidenceFieldSummary) + "\n" +
+                "Covers missing: " + missingCovers + "\n" +
                 "Planned owned changes: " + planned + "\n" +
                 "User overrides preserved: " + userOverrides + "\n" +
                 "Conflicts requiring no automatic mutation: " + conflicts + "\n" +
