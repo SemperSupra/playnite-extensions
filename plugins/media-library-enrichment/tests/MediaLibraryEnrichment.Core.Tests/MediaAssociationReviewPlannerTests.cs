@@ -147,7 +147,8 @@ namespace MediaLibraryEnrichment.Core.Tests
             var unadmitted = Game("Match");
             unadmitted.AdmissionEvidenceKey = null;
             var output = MediaAssociationReviewPlanner.Build(
-                new[] { unadmitted, Game("Other") },
+                new[] { unadmitted,
+                    Game("Other", id: "e1d23d4d-354f-47a5-a64a-bc2385042001") },
                 Files(File("Match.pdf", "book"), File("No Link.pdf", "book")));
             Assert.Empty(output.Suggestions);
             Assert.Equal(1, output.EligibleObservationCount);
