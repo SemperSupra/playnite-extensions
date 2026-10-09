@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -49,7 +50,14 @@ namespace MediaLibraryEnrichment
                     name.IndexOf('/') >= 0 ||
                     name.IndexOf('\\') >= 0 ||
                     name.IndexOf(':') >= 0 ||
-                    name.Any(char.IsControl) ||
+                    name.Any(c =>
+                    {
+                        var kind = char.GetUnicodeCategory(c);
+                        return char.IsControl(c) ||
+                            kind == UnicodeCategory.Format ||
+                            kind == UnicodeCategory.LineSeparator ||
+                            kind == UnicodeCategory.ParagraphSeparator;
+                    }) ||
                     !string.Equals(
                         MediaCandidateClassifier.ClassifyKind(name, null),
                         suggestion.MediaKindHint, StringComparison.Ordinal))
