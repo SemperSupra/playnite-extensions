@@ -65,6 +65,31 @@ namespace MediaLibraryEnrichment.Core.Tests
         }
 
         [Fact]
+        public void RejectsAChildRootReachedThroughDirectorySymlink()
+        {
+            var outside = Path.Combine(Path.GetTempPath(),
+                "mle-inventory-external-" + Guid.NewGuid().ToString("N"));
+            var child = Path.Combine(outside, "target");
+            var link = Path.Combine(root, "redirect");
+            Directory.CreateDirectory(child);
+            try
+            {
+                // A root that appears to be a normal child can traverse a parent link.
+                Directory.CreateSymbolicLink(link, outside);
+                Assert.Throws<NotSupportedException>(() =>
+                    MediaFileInventory.InspectImmediateFiles(Path.Combine(link, "target")));
+            }
+            finally
+            {
+                if (Directory.Exists(link))
+                {
+                    Directory.Delete(link);
+                }
+                Directory.Delete(outside, true);
+            }
+        }
+
+        [Fact]
         public void RejectsMissingRootAndInvalidLimit()
         {
             Assert.Throws<DirectoryNotFoundException>(() =>
