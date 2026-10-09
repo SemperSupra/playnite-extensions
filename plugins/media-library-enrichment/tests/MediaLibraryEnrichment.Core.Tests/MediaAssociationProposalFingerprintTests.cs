@@ -80,6 +80,8 @@ namespace MediaLibraryEnrichment.Core.Tests
         [InlineData("Book.pdf ")]
         [InlineData("Book.txt")]
         [InlineData("Book\u0001.epub")]
+        [InlineData("Book\u202E.epub")]
+        [InlineData("Book\u200D.pdf")]
         public void UntrustedFilenamesFailClosed(string name)
         {
             Assert.Throws<InvalidOperationException>(() =>
