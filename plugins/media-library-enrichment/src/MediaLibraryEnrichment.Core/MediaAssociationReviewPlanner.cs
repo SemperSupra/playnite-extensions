@@ -93,6 +93,11 @@ namespace MediaLibraryEnrichment
             foreach (var group in fileGroups.OrderBy(
                 pair => pair.Key, StringComparer.OrdinalIgnoreCase))
             {
+                if (duplicateTitles.Contains(group.Key))
+                {
+                    ambiguous++;
+                    continue;
+                }
                 MediaObservation[] gamesWithTitle;
                 if (!titleGroups.TryGetValue(group.Key, out gamesWithTitle))
                 {
