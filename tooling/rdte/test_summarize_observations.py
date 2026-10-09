@@ -49,5 +49,39 @@ class MleCoverageTests(unittest.TestCase):
                 "Kind":"unresolved", "EvidenceFieldsPresent":{"manual": "x"}
             }]})
 
+    def test_jules_display_labels_normalized_to_stable_codes(self):
+        examples = [
+            ("supported Manual extension", "SUPPORTED_MANUAL_EXTENSION"),
+            ("supported Notes extension", "SUPPORTED_NOTES_EXTENSION"),
+            ("no local evidence", "NO_LOCAL_EVIDENCE"),
+            ("no supported extension", "NO_SUPPORTED_MEDIA_EXTENSION")
+        ]
+        doc = {"CandidateCount": len(examples), "Candidates": [
+            {"Kind": "unresolved", "ClassificationReason":label}
+            for label, _ in examples
+        ]}
+        out = summarize(doc)
+        self.assertEqual(
+            out["classification_reasons"],
+            {stable: 1 for _, stable in examples})
+        self.assertNotIn("supported Manual extension", json.dumps(out))
+
+    def test_opaque_reason_and_kind_do_not_leak(self):
+        doc = {"CandidateCount": 1, "Candidates": [{
+            "Kind": {"private": "should-not-echo"},
+            "ClassificationReason": ["private-should-not-echo"]
+        }]}
+        out = summarize(doc)
+        self.assertEqual(out["kinds"], {"other": 1})
+        self.assertEqual(
+            out["classification_reasons"], {"not-recorded-or-unknown": 1})
+        self.assertNotIn("should-not-echo", json.dumps(out))
+
+    def test_malformed_nested_field_rejected(self):
+        with self.assertRaisesRegex(ValueError, "invalid evidence fields"):
+            summarize({"CandidateCount": 1, "Candidates": [{
+                "EvidenceFieldsPresent": [["not-hashable"]]
+            }]})
+
 if __name__=="__main__":
     unittest.main()
