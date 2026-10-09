@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Windows.Forms;
 
 namespace MediaLibraryEnrichment
 {
@@ -12,18 +11,12 @@ namespace MediaLibraryEnrichment
         {
             try
             {
-                string selectedRoot;
-                using (var picker = new FolderBrowserDialog())
+                // Playnite owns the modal picker. Cancel returns an empty path
+                // and must perform no enumeration.
+                var selectedRoot = PlayniteApi.Dialogs.SelectFolder();
+                if (string.IsNullOrWhiteSpace(selectedRoot))
                 {
-                    picker.Description = "Select one folder to inspect read-only (top-level files only).";
-                    picker.ShowNewFolderButton = false;
-
-                    if (picker.ShowDialog() != DialogResult.OK ||
-                        string.IsNullOrWhiteSpace(picker.SelectedPath))
-                    {
-                        return;
-                    }
-                    selectedRoot = picker.SelectedPath;
+                    return;
                 }
 
                 PlayniteApi.Dialogs.ShowMessage(
