@@ -281,6 +281,8 @@ namespace MediaLibraryEnrichment
         public string Source { get; set; }
         public string Kind { get; set; }
         public string ClassificationReason { get; set; }
+        // Presence identifiers only; never field values.
+        public string[] EvidenceFieldsPresent { get; set; }
         public string LocalEvidenceName { get; set; }
         public string[] LocalEvidenceNames { get; set; }
         public string AdmissionEvidenceKey { get; set; }
