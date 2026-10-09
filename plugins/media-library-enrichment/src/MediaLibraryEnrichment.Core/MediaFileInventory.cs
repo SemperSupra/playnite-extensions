@@ -48,9 +48,14 @@ namespace MediaLibraryEnrichment
             {
                 throw new DirectoryNotFoundException("The selected directory does not exist.");
             }
-            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+            // A lexical child path can still escape through a parent junction.
+            // Reject any reparse point in the complete selected-directory ancestry.
+            for (var ancestor = directory; ancestor != null; ancestor = ancestor.Parent)
             {
-                throw new NotSupportedException("Symbolic link or reparse-point directory roots are prohibited.");
+                if ((ancestor.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new NotSupportedException("Reparse-point directory roots or ancestors are prohibited.");
+                }
             }
 
             var results = new List<MediaFileInventoryItem>();
