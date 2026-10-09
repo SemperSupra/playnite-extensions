@@ -207,6 +207,17 @@ namespace MediaLibraryEnrichment
                     continue;
                 }
 
+                // Only fixed identifiers enter the new diagnostic signal; never
+                // inspect, print, export, or interpret field values here.
+                var fieldsPresent = new List<string>();
+                if (!string.IsNullOrWhiteSpace(game.Manual)) fieldsPresent.Add("manual");
+                if (!string.IsNullOrWhiteSpace(game.Notes)) fieldsPresent.Add("notes");
+                if (!string.IsNullOrWhiteSpace(game.Description)) fieldsPresent.Add("description");
+                if (!string.IsNullOrWhiteSpace(game.InstallDirectory)) fieldsPresent.Add("install-directory");
+                if (game.Links != null && game.Links.Count > 0) fieldsPresent.Add("links");
+                if (game.GameActions != null && game.GameActions.Count > 0) fieldsPresent.Add("game-actions");
+                if (game.Roms != null && game.Roms.Count > 0) fieldsPresent.Add("roms");
+
                 candidates.Add(
                     new MediaObservation
                     {
@@ -222,6 +233,7 @@ namespace MediaLibraryEnrichment
                         ClassificationReason = MediaCandidateClassifier.ClassifyReason(
                             game.Manual,
                             game.Notes),
+                        EvidenceFieldsPresent = fieldsPresent.ToArray(),
                         LocalEvidenceName =
                             MediaCandidateClassifier.NormalizeLocalEvidenceName(
                                 game.Manual),
