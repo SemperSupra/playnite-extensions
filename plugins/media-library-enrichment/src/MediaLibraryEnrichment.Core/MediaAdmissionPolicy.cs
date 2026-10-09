@@ -55,6 +55,16 @@ namespace MediaLibraryEnrichment
             string providerGameId,
             string sourceName)
         {
+            return TryCreate(playniteId, providerGameId, sourceName, null, null);
+        }
+
+        public static MediaAdmissionEvidence TryCreate(
+            string playniteId,
+            string providerGameId,
+            string sourceName,
+            string manualPath,
+            string notes)
+        {
             Guid parsed;
             if (!Guid.TryParse(playniteId, out parsed) ||
                 string.IsNullOrWhiteSpace(sourceName) ||

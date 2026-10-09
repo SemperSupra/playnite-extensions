@@ -29,6 +29,21 @@ namespace MediaLibraryEnrichment.Core.Tests
         }
 
         [Fact]
+        public void HumbleAdapterOverloadAcceptsOptionalFileEvidence()
+        {
+            var evidence = HumbleMediaAdmissionAdapter.TryCreate(
+                "73000000-0000-4000-8000-000000000001",
+                "provider-item-1",
+                "Humble Bundle RDTE",
+                @"C:\library\book.pdf",
+                "Notes with C:\\library\\book.pdf");
+
+            Assert.NotNull(evidence);
+            Assert.Equal("humble-source-v1", evidence.ProducerKind);
+            Assert.Equal("humble-source:provider-item-1", evidence.EvidenceKey);
+        }
+
+        [Fact]
         public void ExplicitEvidenceCanAdmitNonHumbleIdentity()
         {
             var evidence = new MediaAdmissionEvidence
