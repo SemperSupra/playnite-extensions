@@ -104,6 +104,18 @@ namespace MediaLibraryEnrichment.Core.Tests
         }
 
         [Fact]
+        public void IneligibleDuplicatePlayniteIdentityStillBlocksReview()
+        {
+            var duplicate = Game("Another Title");
+            duplicate.AdmissionEvidenceKey = null;
+            var output = MediaAssociationReviewPlanner.Build(
+                new[] { Game("Original Title"), duplicate },
+                Files(File("Original Title.epub", "book")));
+            Assert.Empty(output.Suggestions);
+            Assert.Equal(0, output.EligibleObservationCount);
+        }
+
+        [Fact]
         public void MixedKindsAndExistingContradictionFailClosed()
         {
             var mixed = MediaAssociationReviewPlanner.Build(
