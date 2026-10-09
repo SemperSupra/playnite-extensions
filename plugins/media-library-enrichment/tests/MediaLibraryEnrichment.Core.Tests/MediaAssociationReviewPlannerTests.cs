@@ -70,6 +70,30 @@ namespace MediaLibraryEnrichment.Core.Tests
         }
 
         [Fact]
+        public void IneligibleDuplicateTitleStillBlocksReviewSuggestion()
+        {
+            var ineligible = Game("Collision",
+                id: "43909f08-c0d6-426e-bd09-3db554b98f90");
+            ineligible.AdmissionEvidenceKey = null;
+            var output = MediaAssociationReviewPlanner.Build(
+                new[] { Game("Collision"), ineligible },
+                Files(File("Collision.pdf", "book")));
+            Assert.Empty(output.Suggestions);
+            Assert.Equal(1, output.AmbiguousMatchGroupCount);
+        }
+
+        [Fact]
+        public void ColonOrControlCharacterInInventoryFileFailsClosed()
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                MediaAssociationReviewPlanner.Build(
+                    new[] { Game("Book") }, Files(File("Book:copy.epub", "book"))));
+            Assert.Throws<InvalidOperationException>(() =>
+                MediaAssociationReviewPlanner.Build(
+                    new[] { Game("Book") }, Files(File("Book\u0001.pdf", "book"))));
+        }
+
+        [Fact]
         public void DuplicatedPlayniteIdentityIsNotEligible()
         {
             var output = MediaAssociationReviewPlanner.Build(
