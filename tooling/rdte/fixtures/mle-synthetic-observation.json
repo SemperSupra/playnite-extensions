@@ -5,7 +5,7 @@
   "Candidates": [
     {
       "Kind": "unresolved",
-      "ClassificationReason": "NO_LOCAL_EVIDENCE",
+      "ClassificationReason": "no local evidence",
       "EvidenceFieldsPresent": [],
       "CoverMissing": true,
       "LocalEvidenceName": "",
@@ -13,7 +13,7 @@
     },
     {
       "Kind": "unresolved",
-      "ClassificationReason": "NO_LOCAL_EVIDENCE",
+      "ClassificationReason": "no local evidence",
       "EvidenceFieldsPresent": [
         "description",
         "links"
@@ -24,7 +24,7 @@
     },
     {
       "Kind": "unresolved",
-      "ClassificationReason": "NO_SUPPORTED_MEDIA_EXTENSION",
+      "ClassificationReason": "no supported extension",
       "EvidenceFieldsPresent": [
         "notes"
       ],
@@ -34,7 +34,7 @@
     },
     {
       "Kind": "book",
-      "ClassificationReason": "SUPPORTED_MANUAL_EXTENSION",
+      "ClassificationReason": "supported Manual extension",
       "EvidenceFieldsPresent": [
         "manual"
       ],
@@ -46,7 +46,7 @@
     },
     {
       "Kind": "comic",
-      "ClassificationReason": "SUPPORTED_NOTES_EXTENSION",
+      "ClassificationReason": "supported Notes extension",
       "EvidenceFieldsPresent": [
         "notes",
         "roms"
@@ -59,7 +59,7 @@
     },
     {
       "Kind": "audio",
-      "ClassificationReason": "SUPPORTED_NOTES_EXTENSION",
+      "ClassificationReason": "supported Notes extension",
       "EvidenceFieldsPresent": [
         "notes",
         "game-actions"
