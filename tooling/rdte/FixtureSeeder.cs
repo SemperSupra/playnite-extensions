@@ -1776,6 +1776,7 @@ namespace SemperSupraRdteSeeder
             var menuSurface = false;
             var previewNoMutation = false;
             var inventoryPreviewNoMutation = false;
+            var associationPreviewNoMutation = false;
             var applyEnabled = false;
             var observePreservedState = false;
             var rollbackReturnedToObserve = false;
@@ -1840,10 +1841,14 @@ namespace SemperSupraRdteSeeder
                 var buildLocalInventoryPreview = pluginType.GetMethod(
                     "BuildLocalInventoryPreviewSummary",
                     BindingFlags.Instance | BindingFlags.NonPublic);
+                var buildAssociationReviewPreview = pluginType.GetMethod(
+                    "BuildAssociationReviewPreviewSummary",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
 
                 if (getMenuItems == null ||
                     buildPreviewSummary == null ||
                     buildLocalInventoryPreview == null ||
+                    buildAssociationReviewPreview == null ||
                     executeModeCore == null)
                 {
                     throw new InvalidOperationException(
@@ -1857,6 +1862,7 @@ namespace SemperSupraRdteSeeder
                 {
                     "Preview current enrichment",
                     "Inspect selected directory (read-only)",
+                    "Preview local media association suggestions (read-only)",
                     "Apply and enable reconciliation",
                     "Observe only (disable changes)",
                     "Rollback owned changes"
@@ -1873,7 +1879,7 @@ namespace SemperSupraRdteSeeder
                         item.Action == null))
                 {
                     throw new InvalidOperationException(
-                        "Playnite menu surface does not expose the five bounded controls.");
+                        "Playnite menu surface does not expose the six bounded controls.");
                 }
                 menuSurface = true;
 
@@ -1931,6 +1937,26 @@ namespace SemperSupraRdteSeeder
                             "Read-only local inventory changed managed state or leaked a filename.");
                     }
                     inventoryPreviewNoMutation = true;
+                    var associationBefore = CaptureMleManagedState();
+                    File.WriteAllText(Path.Combine(syntheticRoot,
+                        "RDTE Humble Ebook.epub"), "");
+                    var associationSummary = (string)buildAssociationReviewPreview.Invoke(
+                        plugin, new object[] { syntheticRoot });
+                    var associationAfter = CaptureMleManagedState();
+                    if (!string.Equals(associationBefore, associationAfter,
+                            StringComparison.Ordinal) ||
+                        !associationSummary.Contains("READ ONLY") ||
+                        !associationSummary.Contains("Review-required suggestions: 1") ||
+                        !associationSummary.Contains("RDTE Humble Ebook => RDTE Humble Ebook.epub") ||
+                        !associationSummary.Contains("Names alone do not prove file identity.") ||
+                        associationSummary.Contains("73000000-0000-4000-8000") ||
+                        !string.Equals(ReadMleMode(productData), "observe",
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Review-only matching Preview leaked an ID, omitted a suggestion or changed managed state.");
+                    }
+                    associationPreviewNoMutation = true;
                 }
                 finally
                 {
@@ -2019,6 +2045,7 @@ namespace SemperSupraRdteSeeder
                         menu_surface = menuSurface,
                         preview_no_library_mutation = previewNoMutation,
                         inventory_preview_no_library_mutation = inventoryPreviewNoMutation,
+                        association_preview_no_library_mutation = associationPreviewNoMutation,
                         apply_enabled = applyEnabled,
                         observe_preserved_state = observePreservedState,
                         rollback_returned_to_observe = rollbackReturnedToObserve,
