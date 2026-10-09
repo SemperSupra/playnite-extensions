@@ -19,7 +19,8 @@ namespace MediaLibraryEnrichment
                 throw new ArgumentNullException("A complete admission snapshot and inventory are required.");
             }
 
-            var games = admittedObservations.ToArray();
+            // Bound enumeration before materializing potentially lazy/untrusted inputs.
+            var games = admittedObservations.Take(10001).ToArray();
             var files = inventory.SupportedFiles;
             if (games.Length > 10000 || files.Length > 10000)
             {
@@ -36,6 +37,10 @@ namespace MediaLibraryEnrichment
                     file.FileName == "." || file.FileName == ".." ||
                     file.FileName.IndexOf('/') >= 0 ||
                     file.FileName.IndexOf('\\') >= 0 ||
+                    file.FileName.IndexOf(':') >= 0 ||
+                    file.FileName.Any(char.IsControl) ||
+                    !string.Equals(file.FileName, file.FileName.Trim(),
+                        StringComparison.Ordinal) ||
                     !IsSupportedKind(file.Kind) ||
                     !string.Equals(
                         MediaCandidateClassifier.ClassifyKind(file.FileName, null),
