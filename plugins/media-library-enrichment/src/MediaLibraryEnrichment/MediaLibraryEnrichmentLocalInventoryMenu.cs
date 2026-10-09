@@ -26,22 +26,8 @@ namespace MediaLibraryEnrichment
                     selectedRoot = picker.SelectedPath;
                 }
 
-                var result = MediaFileInventory.InspectImmediateFiles(selectedRoot);
-                var kinds = string.Join(
-                    ", ",
-                    result.SupportedFiles
-                        .GroupBy(item => item.Kind ?? "unresolved")
-                        .OrderBy(group => group.Key, StringComparer.Ordinal)
-                        .Select(group => group.Key + "=" + group.Count()));
-
                 PlayniteApi.Dialogs.ShowMessage(
-                    "Read-only inspection complete. No Playnite records were modified.\n\n" +
-                    "Entries examined: " + result.EntriesExamined + "\n" +
-                    "Supported media filenames: " + result.SupportedFiles.Length + "\n" +
-                    "Kinds: " + (string.IsNullOrEmpty(kinds) ? "none" : kinds) + "\n" +
-                    "Reparse-point entries skipped: " + result.ReparsePointsSkipped + "\n\n" +
-                    "Nothing has been associated with a Playnite record.\n" +
-                    "This inspection does not authorize Apply, covers, or actions.",
+                    BuildLocalInventoryPreviewSummary(selectedRoot),
                     "Media Library Enrichment — Local Inventory");
             }
             catch (Exception exception)
@@ -52,6 +38,26 @@ namespace MediaLibraryEnrichment
                     "Failure type: " + exception.GetType().Name + ".",
                     "Media Library Enrichment — Local Inventory");
             }
+        }
+        // Separate, deterministic non-mutating core for native RDTE.
+        // Caller explicitly supplies a selected root; never invoked at startup.
+        private string BuildLocalInventoryPreviewSummary(string selectedRoot)
+        {
+            var result = MediaFileInventory.InspectImmediateFiles(selectedRoot);
+            var kinds = string.Join(
+                ", ",
+                result.SupportedFiles
+                    .GroupBy(item => item.Kind ?? "unresolved")
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .Select(group => group.Key + "=" + group.Count()));
+
+            return "Read-only inspection complete. No Playnite records were modified.\n\n" +
+                "Entries examined: " + result.EntriesExamined + "\n" +
+                "Supported media filenames: " + result.SupportedFiles.Length + "\n" +
+                "Kinds: " + (string.IsNullOrEmpty(kinds) ? "none" : kinds) + "\n" +
+                "Reparse-point entries skipped: " + result.ReparsePointsSkipped + "\n\n" +
+                "Nothing has been associated with a Playnite record.\n" +
+                "This inspection does not authorize Apply, covers, or actions.";
         }
     }
 }
