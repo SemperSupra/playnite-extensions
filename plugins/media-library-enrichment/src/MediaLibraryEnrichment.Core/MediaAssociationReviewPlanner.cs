@@ -67,10 +67,12 @@ namespace MediaLibraryEnrichment
                 !string.IsNullOrWhiteSpace(game.AdmissionProducerKind) &&
                 !string.IsNullOrWhiteSpace(game.AdmissionEvidenceKey)).ToArray();
 
-            // One Playnite ID must not appear as competing observations.
+            // Duplicate IDs among any observations (even inadmissible ones)
+            // taint the identity for review; admission must not hide collision.
             var duplicateIds = new HashSet<string>(
-                eligible.GroupBy(game => Guid.Parse(game.PlayniteId).ToString(),
-                    StringComparer.OrdinalIgnoreCase)
+                games.Where(game => Guid.TryParse(game.PlayniteId, out var ignored))
+                    .GroupBy(game => Guid.Parse(game.PlayniteId).ToString(),
+                        StringComparer.OrdinalIgnoreCase)
                     .Where(group => group.Count() != 1)
                     .Select(group => group.Key), StringComparer.OrdinalIgnoreCase);
             eligible = eligible.Where(game =>
