@@ -14,6 +14,14 @@ REASONS = {"SUPPORTED_MANUAL_EXTENSION", "SUPPORTED_NOTES_EXTENSION",
 FIELDS = {"manual", "notes", "description", "install-directory",
           "links", "game-actions", "roms"}
 
+# Exact compatibility aliases for Jules PR #10. Unknown labels are never copied to output.
+REASON_ALIASES = {
+    "supported Manual extension": "SUPPORTED_MANUAL_EXTENSION",
+    "supported Notes extension": "SUPPORTED_NOTES_EXTENSION",
+    "no local evidence": "NO_LOCAL_EVIDENCE",
+    "no supported extension": "NO_SUPPORTED_MEDIA_EXTENSION",
+}
+
 def summarize(doc):
     if doc.get("Schema") not in (None, "sempersupra-media-library-enrichment-observation/v1"):
         raise ValueError("unexpected observation receipt schema")
@@ -28,14 +36,17 @@ def summarize(doc):
         if not isinstance(item, dict):
             raise ValueError("invalid candidate")
         kind = item.get("Kind")
-        kinds[kind if kind in KINDS else "other"] += 1
+        kinds[kind if isinstance(kind, str) and kind in KINDS else "other"] += 1
         reason = item.get("ClassificationReason")
-        reasons[reason if reason in REASONS else "not-recorded-or-unknown"] += 1
-        present = item.get("EvidenceFieldsPresent") or []
-        if not isinstance(present, list):
+        canonical = REASON_ALIASES.get(reason, reason) if isinstance(reason, str) else None
+        reasons[canonical if canonical in REASONS else "not-recorded-or-unknown"] += 1
+        present = item.get("EvidenceFieldsPresent")
+        if present is None:
+            present = []
+        if not isinstance(present, list) or any(not isinstance(field, str) for field in present):
             raise ValueError("invalid evidence fields")
         for field in set(present):
-            fields[field if isinstance(field, str) and field in FIELDS else "other"] += 1
+            fields[field if field in FIELDS else "other"] += 1
         missing_cover += item.get("CoverMissing") is True
         no_variants += not bool(item.get("LocalEvidenceNames")) and not bool(item.get("LocalEvidenceName"))
     return {"schema":"mle-anonymous-coverage/v1", "candidate_count":len(candidates),
