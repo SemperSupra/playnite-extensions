@@ -31,6 +31,13 @@ namespace MediaLibraryEnrichment
             yield return new MainMenuItem
             {
                 MenuSection = MenuSectionName,
+                Description = "Preview local media association suggestions (read-only)",
+                Action = _ => ShowAssociationReviewPreview()
+            };
+
+            yield return new MainMenuItem
+            {
+                MenuSection = MenuSectionName,
                 Description = "Apply and enable reconciliation",
                 Action = _ => ExecuteMode("apply", false)
             };
