@@ -1844,11 +1844,15 @@ namespace SemperSupraRdteSeeder
                 var buildAssociationReviewPreview = pluginType.GetMethod(
                     "BuildAssociationReviewPreviewSummary",
                     BindingFlags.Instance | BindingFlags.NonPublic);
+                var sanitizeReviewLabel = pluginType.GetMethod(
+                    "SafeReviewDisplay",
+                    BindingFlags.Static | BindingFlags.NonPublic);
 
                 if (getMenuItems == null ||
                     buildPreviewSummary == null ||
                     buildLocalInventoryPreview == null ||
                     buildAssociationReviewPreview == null ||
+                    sanitizeReviewLabel == null ||
                     executeModeCore == null)
                 {
                     throw new InvalidOperationException(
@@ -1955,6 +1959,18 @@ namespace SemperSupraRdteSeeder
                     {
                         throw new InvalidOperationException(
                             "Review-only matching Preview leaked an ID, omitted a suggestion or changed managed state.");
+                    }
+                    var spoofed = "Synthetic" + (char)0x202E + "Hidden" +
+                        (char)0x2066 + "Title" + (char)0x200D;
+                    var safeLabel = (string)sanitizeReviewLabel.Invoke(
+                        null, new object[] { spoofed });
+                    if (safeLabel.Contains(((char)0x202E).ToString()) ||
+                        safeLabel.Contains(((char)0x2066).ToString()) ||
+                        safeLabel.Contains(((char)0x200D).ToString()) ||
+                        !safeLabel.Contains("Hidden"))
+                    {
+                        throw new InvalidOperationException(
+                            "Review Preview did not neutralize Unicode bidi/format spoofing.");
                     }
                     associationPreviewNoMutation = true;
                 }
