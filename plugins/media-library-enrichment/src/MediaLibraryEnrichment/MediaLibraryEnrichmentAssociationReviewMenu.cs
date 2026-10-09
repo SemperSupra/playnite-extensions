@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 
@@ -91,8 +92,19 @@ namespace MediaLibraryEnrichment
             {
                 return "(unnamed)";
             }
+            // Unicode format controls include bidi overrides/isolates and
+            // zero-width characters that can misrepresent a review suggestion.
+            // The local Preview is not identity evidence; make spoofing visible.
             var safe = new string(raw.Select(character =>
-                char.IsControl(character) ? ' ' : character).ToArray()).Trim();
+            {
+                var category = char.GetUnicodeCategory(character);
+                return char.IsControl(character) ||
+                       category == UnicodeCategory.Format ||
+                       category == UnicodeCategory.LineSeparator ||
+                       category == UnicodeCategory.ParagraphSeparator
+                    ? ' '
+                    : character;
+            }).ToArray()).Trim();
             return safe.Length <= 72 ? safe : safe.Substring(0, 72) + "...";
         }
     }
