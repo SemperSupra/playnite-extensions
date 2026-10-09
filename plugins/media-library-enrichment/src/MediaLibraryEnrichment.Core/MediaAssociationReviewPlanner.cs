@@ -51,8 +51,18 @@ namespace MediaLibraryEnrichment
                 }
             }
 
+            // A second observation with the same normalized title must not be
+            // ignored merely because it failed admission; collision remains real.
+            var duplicateTitles = new HashSet<string>(
+                games.Where(game => !string.IsNullOrWhiteSpace(game.Name))
+                    .GroupBy(game => game.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .Where(group => group.Count() > 1)
+                    .Select(group => group.Key),
+                StringComparer.OrdinalIgnoreCase);
+
             var eligible = games.Where(game =>
                 !string.IsNullOrWhiteSpace(game.Name) &&
+                !duplicateTitles.Contains(game.Name.Trim()) &&
                 Guid.TryParse(game.PlayniteId, out var ignored) &&
                 !string.IsNullOrWhiteSpace(game.AdmissionProducerKind) &&
                 !string.IsNullOrWhiteSpace(game.AdmissionEvidenceKey)).ToArray();
