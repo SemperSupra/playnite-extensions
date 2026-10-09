@@ -42,7 +42,7 @@ namespace MediaLibraryEnrichment.Core.Tests
             var snapshot = MediaLocalFileEvidencePreflight.Inspect(
                 root, Proposal(filename), BindingA);
             Assert.Equal("mle-local-evidence-preflight/v1", snapshot.Schema);
-            Assert.Equal(1, snapshot.Entries.Length);
+            Assert.Single(snapshot.Entries);
             Assert.Equal(filename, snapshot.Entries[0].FileName);
             Assert.Equal(beforeBytes.LongLength, snapshot.Entries[0].Length);
             Assert.True(snapshot.Entries[0].LastWriteUtcTicks > 0);
